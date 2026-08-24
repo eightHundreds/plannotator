@@ -8,17 +8,17 @@ Install the `plannotator` command so Claude Code can use it:
 
 **macOS / Linux / WSL:**
 ```bash
-curl -fsSL https://plannotator.ai/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/eightHundreds/plannotator/main/scripts/install.sh | bash
 ```
 
 **Windows PowerShell:**
 ```powershell
-irm https://plannotator.ai/install.ps1 | iex
+irm https://raw.githubusercontent.com/eightHundreds/plannotator/main/scripts/install.ps1 | iex
 ```
 
 **Windows CMD:**
 ```cmd
-curl -fsSL https://plannotator.ai/install.cmd -o install.cmd && install.cmd && del install.cmd
+curl -fsSL https://raw.githubusercontent.com/eightHundreds/plannotator/main/scripts/install.cmd -o install.cmd && install.cmd && del install.cmd
 ```
 
 Released binaries ship with SHA256 sidecars and [SLSA build provenance](https://slsa.dev/) attestations from v0.17.2 onwards. See the [installation docs](https://plannotator.ai/docs/getting-started/installation/) for version pinning and the [verification docs](https://plannotator.ai/docs/reference/verifying-your-install/) for verification commands.

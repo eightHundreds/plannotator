@@ -9,13 +9,13 @@ Interactive plan review, code review, and markdown annotation for GitHub Copilot
 **macOS / Linux / WSL:**
 
 ```bash
-curl -fsSL https://plannotator.ai/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/eightHundreds/plannotator/main/scripts/install.sh | bash
 ```
 
 **Windows PowerShell:**
 
 ```powershell
-irm https://plannotator.ai/install.ps1 | iex
+irm https://raw.githubusercontent.com/eightHundreds/plannotator/main/scripts/install.ps1 | iex
 ```
 
 **Then in Copilot CLI:**

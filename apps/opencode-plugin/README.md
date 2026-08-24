@@ -62,7 +62,7 @@ Restart OpenCode. By default, the `submit_plan` tool is available to OpenCode's 
 
 > **OpenCode 1 slash commands:** Run the install script to get `/plannotator-review`, `/plannotator-annotate`, and `/plannotator-last`:
 > ```bash
-> curl -fsSL https://plannotator.ai/install.sh | bash
+> curl -fsSL https://raw.githubusercontent.com/eightHundreds/plannotator/main/scripts/install.sh | bash
 > ```
 > This also clears any cached plugin versions.
 

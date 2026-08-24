@@ -13,7 +13,7 @@ It does not attempt plan-mode interception or host-level planning integration.
 Install the `plannotator` CLI first:
 
 ```bash
-curl -fsSL https://plannotator.ai/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/eightHundreds/plannotator/main/scripts/install.sh | bash
 ```
 
 Then add the marketplace and install the plugin:

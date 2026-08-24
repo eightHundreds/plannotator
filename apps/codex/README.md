@@ -9,7 +9,7 @@ Plan review uses Codex's experimental `Stop` hook. This is a post-render review 
 **macOS / Linux / WSL:**
 
 ```bash
-curl -fsSL https://plannotator.ai/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/eightHundreds/plannotator/main/scripts/install.sh | bash
 ```
 
 The installer adds the `plannotator` binary and, when Codex is installed or the Codex home already exists, enables Codex
@@ -19,7 +19,7 @@ Stop hooks automatically. The Codex home is `$CODEX_HOME` when set, falling back
 **Windows PowerShell:**
 
 ```powershell
-irm https://plannotator.ai/install.ps1 | iex
+irm https://raw.githubusercontent.com/eightHundreds/plannotator/main/scripts/install.ps1 | iex
 ```
 
 Codex hooks on native Windows are experimental. The Windows installer does not enable them automatically; it prints

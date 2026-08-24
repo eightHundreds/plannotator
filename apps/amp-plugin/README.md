@@ -15,7 +15,7 @@ not intercept Amp's planning flow.
 Install the `plannotator` CLI first:
 
 ```bash
-curl -fsSL https://plannotator.ai/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/eightHundreds/plannotator/main/scripts/install.sh | bash
 ```
 
 Then install the Amp plugin:

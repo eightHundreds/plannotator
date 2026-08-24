@@ -27,7 +27,7 @@ convention used for Codex and Gemini) and installs:
   is never overwritten)
 
 ```bash
-curl -fsSL https://plannotator.ai/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/eightHundreds/plannotator/main/scripts/install.sh | bash
 ```
 
 ## Use the Plannotator agent
