@@ -91,6 +91,9 @@ export function useCommitsView({
   const fingerprintRef = useRef('');
   const limitRef = useRef(limit);
   limitRef.current = limit;
+  const hasMoreRef = useRef(hasMore);
+  hasMoreRef.current = hasMore;
+  const loadingMoreRef = useRef(false);
   const queryRef = useRef({ showRemotes, showStashes, branchFilter });
   queryRef.current = { showRemotes, showStashes, branchFilter };
 
@@ -108,9 +111,15 @@ export function useCommitsView({
   };
 
   const fetchGraph = useCallback(async (opts?: { more?: boolean; silent?: boolean }) => {
+    if (opts?.more && (loadingMoreRef.current || !hasMoreRef.current)) return;
     const generation = ++generationRef.current;
     const nextLimit = opts?.more ? limitRef.current + PAGE_SIZE : limitRef.current;
-    if (opts?.more) setLimit(nextLimit);
+    if (opts?.more) {
+      loadingMoreRef.current = true;
+      setLimit(nextLimit);
+    } else {
+      loadingMoreRef.current = false;
+    }
     if (!opts?.silent) {
       if (opts?.more) setIsLoadingMore(true);
       else setIsLoading(true);
@@ -127,8 +136,14 @@ export function useCommitsView({
       const data = (await res.json()) as CommitGraphPage & { error?: string };
       if (generation !== generationRef.current) return;
       if (!res.ok || data.error) throw new Error(data.error || 'Failed to load commits');
+      const prevCount = commitsRef.current.length;
       applyPage(data);
-      if (opts?.more) limitRef.current = nextLimit;
+      if (opts?.more) {
+        limitRef.current = nextLimit;
+        // Server caps the window (GRAPH_LIMIT_MAX); a no-growth page must
+        // not keep the infinite-scroll sentinel firing forever.
+        if (data.commits.length <= prevCount) setHasMore(false);
+      }
     } catch (err) {
       if (generation !== generationRef.current) return;
       if (!opts?.silent) {
@@ -138,6 +153,7 @@ export function useCommitsView({
       if (generation === generationRef.current) {
         setIsLoading(false);
         setIsLoadingMore(false);
+        loadingMoreRef.current = false;
       }
     }
   }, []);
@@ -153,6 +169,7 @@ export function useCommitsView({
       setHasMore(false);
       setLimit(PAGE_SIZE);
       limitRef.current = PAGE_SIZE;
+      loadingMoreRef.current = false;
       fingerprintRef.current = '';
     }
     void fetchGraph();

@@ -1,8 +1,9 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import type { CommitGraphEntry, GraphLayout } from '@plannotator/shared/git-graph-history';
 import { UNCOMMITTED_HASH } from '@plannotator/shared/git-graph-history';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
+import { useOverlayViewport } from '@plannotator/ui/hooks/useOverlayViewport';
 import { formatRelativeTime } from '@plannotator/ui/utils/aiChatFormat';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { PanelViewToggle, type ReviewPanelView } from './PanelViewToggle';
@@ -146,6 +147,20 @@ export const CommitsPanel: React.FC<CommitsPanelProps> = ({
   const [menu, setMenu] = useState<{ x: number; y: number; items: GitGraphMenuItem[] } | null>(null);
   const [prompt, setPrompt] = useState<GitGraphPromptSpec | null>(null);
   const [tagDetails, setTagDetails] = useState<string | null>(null);
+  const { viewport, onViewportReady } = useOverlayViewport<HTMLDivElement>();
+
+  const tryLoadMore = useCallback(
+    (node?: HTMLElement | null) => {
+      const el = node ?? viewport;
+      if (!el || !hasMore || isLoadingMore) return;
+      if (el.scrollHeight - el.scrollTop - el.clientHeight < 160) onShowMore();
+    },
+    [viewport, hasMore, isLoadingMore, onShowMore],
+  );
+
+  useEffect(() => {
+    tryLoadMore();
+  }, [tryLoadMore, commits.length]);
 
   const host: GraphActionHost = useMemo(
     () => ({
@@ -304,7 +319,12 @@ export const CommitsPanel: React.FC<CommitsPanelProps> = ({
         </div>
       )}
 
-      <OverlayScrollArea className="flex-1 min-h-0" overflowX="auto">
+      <OverlayScrollArea
+        className="flex-1 min-h-0"
+        overflowX="auto"
+        onViewportReady={onViewportReady}
+        onScroll={(ev) => tryLoadMore(ev.currentTarget)}
+      >
         <div className="relative" onContextMenu={onContextMenu}>
           {layout && commits.length > 0 && (
             <GitGraphSvg
@@ -343,14 +363,8 @@ export const CommitsPanel: React.FC<CommitsPanelProps> = ({
                     onSelect={() => selectRow(commit)}
                   />
                 ))}
-                {hasMore && (
-                  <button
-                    onClick={onShowMore}
-                    disabled={isLoadingMore}
-                    className="w-full text-left px-2 py-1 text-[11px] text-primary/80 underline underline-offset-2 decoration-primary/40 hover:text-primary hover:decoration-primary transition-colors disabled:opacity-50"
-                  >
-                    {isLoadingMore ? 'Loading…' : 'Show more'}
-                  </button>
+                {hasMore && isLoadingMore && (
+                  <div className="px-2 py-2 text-[11px] text-muted-foreground/50">Loading…</div>
                 )}
                 {error && (
                   <div className="px-2 py-1.5 flex items-center gap-2 text-[11px] text-destructive">

@@ -149,9 +149,9 @@ export const CommittedDot: React.FC = () => (
  * only a filename that alone exceeds the row truncates at its own end. */
 export const TruncatedPath: React.FC<{ path: string }> = ({ path }) => {
   const slash = path.lastIndexOf('/');
-  if (slash === -1) return <span className="truncate">{path}</span>;
+  if (slash === -1) return <span className="min-w-0 truncate">{path}</span>;
   return (
-    <span className="flex items-center min-w-0">
+    <span className="flex min-w-0 items-center">
       <span className="truncate">{path.slice(0, slash)}</span>
       <span className="flex-shrink-0 max-w-full truncate">{path.slice(slash)}</span>
     </span>

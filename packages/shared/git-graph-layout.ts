@@ -1,14 +1,11 @@
 /**
  * Assign columns (lanes) and polyline segments for a newest-first commit DAG.
  *
- * Lane assignment is gitlane's (itself a simplification of mhutchie
- * vscode-git-graph). Verticals then join an existing rail on the parent
- * column instead of stacking a second collinear stroke — gitlane always
- * emitted a full child-colour vertical to the parent, which vscode-git-graph's
- * `determinePath` merge case avoids via `getPointConnectingTo`.
- *
- * Grid is sized for Plannotator's two-line commit rows rather than gitlane's
- * 24px table.
+ * Path construction is mhutchie vscode-git-graph's `Graph.determinePath`
+ * (`web/graph.ts`): unavailable points, merge join via `getPointConnectingTo`,
+ * and a null vertex so a parent outside the loaded window still continues
+ * the branch to the last visible row. Grid is sized for Plannotator's
+ * two-line commit rows.
  */
 
 export const UNCOMMITTED_HASH = "*";
@@ -61,6 +58,122 @@ export type GraphLayout = {
   colours: string[];
 };
 
+const NULL_VERTEX_ID = -1;
+
+type VertexOrNull = Vertex | null;
+
+class Branch {
+  readonly colour: number;
+  private end = 0;
+  readonly lines: GraphLine[] = [];
+
+  constructor(colour: number) {
+    this.colour = colour;
+  }
+
+  addLine(p1: GraphPoint, p2: GraphPoint, isCommitted: boolean, lockedFirst: boolean) {
+    this.lines.push({ p1, p2, isCommitted, lockedFirst });
+  }
+
+  getColour() {
+    return this.colour;
+  }
+
+  setEnd(end: number) {
+    this.end = end;
+  }
+}
+
+class Vertex {
+  readonly id: number;
+  readonly isStash: boolean;
+  private x = 0;
+  private readonly parents: Vertex[] = [];
+  private nextParent = 0;
+  private onBranch: Branch | null = null;
+  private isCommitted = true;
+  private nextX = 0;
+  private readonly connections: { connectsTo: VertexOrNull; onBranch: Branch }[] = [];
+
+  constructor(id: number, isStash: boolean) {
+    this.id = id;
+    this.isStash = isStash;
+  }
+
+  addParent(vertex: Vertex) {
+    this.parents.push(vertex);
+  }
+
+  getNextParent(): VertexOrNull {
+    if (this.nextParent < this.parents.length) return this.parents[this.nextParent];
+    return null;
+  }
+
+  registerParentProcessed() {
+    this.nextParent++;
+  }
+
+  isMerge() {
+    return this.parents.length > 1;
+  }
+
+  addToBranch(branch: Branch, x: number) {
+    if (this.onBranch === null) {
+      this.onBranch = branch;
+      this.x = x;
+    }
+  }
+
+  isNotOnBranch() {
+    return this.onBranch === null;
+  }
+
+  getBranch() {
+    return this.onBranch;
+  }
+
+  getPoint(): GraphPoint {
+    return { x: this.x, y: this.id };
+  }
+
+  getNextPoint(): GraphPoint {
+    return { x: this.nextX, y: this.id };
+  }
+
+  getPointConnectingTo(vertex: VertexOrNull, onBranch: Branch): GraphPoint | null {
+    for (let i = 0; i < this.connections.length; i++) {
+      const c = this.connections[i];
+      if (c && c.connectsTo === vertex && c.onBranch === onBranch) {
+        return { x: i, y: this.id };
+      }
+    }
+    return null;
+  }
+
+  registerUnavailablePoint(x: number, connectsToVertex: VertexOrNull, onBranch: Branch) {
+    if (x === this.nextX) {
+      this.nextX = x + 1;
+      this.connections[x] = { connectsTo: connectsToVertex, onBranch };
+    }
+  }
+
+  getColour() {
+    return this.onBranch !== null ? this.onBranch.getColour() : 0;
+  }
+
+  getIsCommitted() {
+    return this.isCommitted;
+  }
+
+  setNotCommitted() {
+    this.isCommitted = false;
+  }
+
+  getX() {
+    return this.x;
+  }
+}
+
 function emptyLayout(): GraphLayout {
   return {
     vertices: [],
@@ -83,175 +196,133 @@ export function layoutGraph(
 
   const head = opts.head ?? null;
   const n = commits.length;
-  const lookup = Object.fromEntries(commits.map((c, i) => [c.hash, i]));
-  const reserved: (string | null)[] = [];
-  const laneColour: number[] = [];
-  let nextColour = 0;
-  const xOf = new Array<number>(n);
-  const colourOf = new Array<number>(n);
-
-  function newLane(hash: string | null) {
-    const x = reserved.length;
-    reserved.push(hash ?? null);
-    laneColour.push(nextColour++);
-    return x;
-  }
-
-  function freeLane() {
-    return reserved.findIndex((h) => h == null);
-  }
-
-  function occupyFreeLane(hash: string | null) {
-    const hole = freeLane();
-    if (hole < 0) return newLane(hash);
-    laneColour[hole] = nextColour++;
-    return hole;
-  }
-
-  function placeCommit(hash: string, freshLane = false) {
-    let x = freshLane ? -1 : reserved.indexOf(hash);
-    if (x < 0) x = occupyFreeLane(hash);
-    for (let j = 0; j < reserved.length; j++) {
-      if (j !== x && reserved[j] === hash) reserved[j] = null;
-    }
-    return x;
-  }
-
-  function reserve(hash: string) {
-    const existing = reserved.indexOf(hash);
-    if (existing >= 0) return existing;
-    const x = occupyFreeLane(hash);
-    reserved[x] = hash;
-    return x;
-  }
+  const lookup: Record<string, number> = Object.fromEntries(commits.map((c, i) => [c.hash, i]));
+  const nullVertex = new Vertex(NULL_VERTEX_ID, false);
+  const vertices: Vertex[] = commits.map((c, i) => new Vertex(i, Boolean(c.stash)));
 
   for (let i = 0; i < n; i++) {
-    const x = placeCommit(commits[i].hash, Boolean(commits[i].stash));
-    xOf[i] = x;
-    colourOf[i] = laneColour[x];
-    const parents = (commits[i].parents || []).filter((p) => typeof lookup[p] === "number");
-    reserved[x] = parents[0] ?? null;
-    for (let p = 1; p < parents.length; p++) reserve(parents[p]);
-  }
-
-  const linesByColour = new Map<number, GraphLine[]>();
-  function addLine(
-    colour: number,
-    p1: GraphPoint,
-    p2: GraphPoint,
-    isCommitted: boolean,
-  ) {
-    let lines = linesByColour.get(colour);
-    if (!lines) {
-      lines = [];
-      linesByColour.set(colour, lines);
+    const parents = commits[i].parents || [];
+    for (let j = 0; j < parents.length; j++) {
+      const parentHash = parents[j];
+      if (typeof lookup[parentHash] === "number") {
+        const parent = vertices[lookup[parentHash]];
+        vertices[i].addParent(parent);
+      } else {
+        vertices[i].addParent(nullVertex);
+      }
     }
-    lines.push({
-      p1,
-      p2,
-      isCommitted,
-      lockedFirst: p1.x < p2.x,
-    });
   }
 
-  // Per-column y-intervals already claimed by a vertical. A later edge that
-  // would paint the same collinear span joins that rail instead of stacking.
-  const occupied: { lo: number; hi: number }[][] = [];
+  if (commits[0].hash === UNCOMMITTED_HASH) {
+    vertices[0].setNotCommitted();
+  }
 
-  function occupyVertical(x: number, y1: number, y2: number) {
-    const lo = Math.min(y1, y2);
-    const hi = Math.max(y1, y2);
-    if (hi <= lo) return;
-    const col = occupied[x] ?? (occupied[x] = []);
-    col.push({ lo, hi });
-    col.sort((a, b) => a.lo - b.lo);
-    const merged: { lo: number; hi: number }[] = [];
-    for (const iv of col) {
-      const last = merged[merged.length - 1];
-      if (last && iv.lo <= last.hi) last.hi = Math.max(last.hi, iv.hi);
-      else merged.push({ lo: iv.lo, hi: iv.hi });
+  const branches: Branch[] = [];
+  const availableColours: number[] = [];
+
+  function getAvailableColour(startAt: number) {
+    for (let i = 0; i < availableColours.length; i++) {
+      if (startAt > availableColours[i]) return i;
     }
-    occupied[x] = merged;
+    availableColours.push(0);
+    return availableColours.length - 1;
   }
 
-  function clipVertical(x: number, y1: number, y2: number): { lo: number; hi: number }[] {
-    const lo = Math.min(y1, y2);
-    const hi = Math.max(y1, y2);
-    if (hi <= lo) return [];
-    let remaining = [{ lo, hi }];
-    for (const occ of occupied[x] ?? []) {
-      const next: { lo: number; hi: number }[] = [];
-      for (const r of remaining) {
-        if (occ.hi <= r.lo || occ.lo >= r.hi) {
-          next.push(r);
-          continue;
+  function determinePath(startAt: number) {
+    let i = startAt;
+    let vertex = vertices[i];
+    let parentVertex = vertices[i].getNextParent();
+    let lastPoint = vertex.isNotOnBranch() ? vertex.getNextPoint() : vertex.getPoint();
+
+    if (
+      parentVertex !== null &&
+      parentVertex.id !== NULL_VERTEX_ID &&
+      vertex.isMerge() &&
+      !vertex.isNotOnBranch() &&
+      !parentVertex.isNotOnBranch()
+    ) {
+      let foundPointToParent = false;
+      const parentBranch = parentVertex.getBranch()!;
+      for (i = startAt + 1; i < vertices.length; i++) {
+        const curVertex = vertices[i];
+        let curPoint = curVertex.getPointConnectingTo(parentVertex, parentBranch);
+        if (curPoint !== null) {
+          foundPointToParent = true;
+        } else {
+          curPoint = curVertex.getNextPoint();
         }
-        if (occ.lo > r.lo) next.push({ lo: r.lo, hi: Math.min(occ.lo, r.hi) });
-        if (occ.hi < r.hi) next.push({ lo: Math.max(occ.hi, r.lo), hi: r.hi });
+        parentBranch.addLine(
+          lastPoint,
+          curPoint,
+          vertex.getIsCommitted(),
+          !foundPointToParent && curVertex !== parentVertex ? lastPoint.x < curPoint.x : true,
+        );
+        curVertex.registerUnavailablePoint(curPoint.x, parentVertex, parentBranch);
+        lastPoint = curPoint;
+        if (foundPointToParent) {
+          vertex.registerParentProcessed();
+          break;
+        }
       }
-      remaining = next.filter((iv) => iv.hi > iv.lo);
-    }
-    return remaining;
-  }
-
-  function addVertical(
-    colour: number,
-    x: number,
-    y1: number,
-    y2: number,
-    isCommitted: boolean,
-  ) {
-    for (const iv of clipVertical(x, y1, y2)) {
-      addLine(colour, { x, y: iv.lo }, { x, y: iv.hi }, isCommitted);
-    }
-    occupyVertical(x, y1, y2);
-  }
-
-  for (let i = 0; i < n; i++) {
-    const isCommitted = commits[i].hash !== UNCOMMITTED_HASH;
-    const parents = (commits[i].parents || []).filter((p) => typeof lookup[p] === "number");
-    for (const parentHash of parents) {
-      const pi = lookup[parentHash];
-      const x1 = xOf[i];
-      const y1 = i;
-      const x2 = xOf[pi];
-      const y2 = pi;
-      const colour = colourOf[i];
-      if (x1 === x2) {
-        addVertical(colour, x1, y1, y2, isCommitted);
-        continue;
+    } else {
+      const branch = new Branch(getAvailableColour(startAt));
+      vertex.addToBranch(branch, lastPoint.x);
+      vertex.registerUnavailablePoint(lastPoint.x, vertex, branch);
+      for (i = startAt + 1; i < vertices.length; i++) {
+        const curVertex = vertices[i];
+        const curPoint =
+          parentVertex === curVertex && !parentVertex.isNotOnBranch()
+            ? curVertex.getPoint()
+            : curVertex.getNextPoint();
+        branch.addLine(lastPoint, curPoint, vertex.getIsCommitted(), lastPoint.x < curPoint.x);
+        curVertex.registerUnavailablePoint(curPoint.x, parentVertex, branch);
+        lastPoint = curPoint;
+        if (parentVertex === curVertex) {
+          vertex.registerParentProcessed();
+          const parentVertexOnBranch = !parentVertex.isNotOnBranch();
+          parentVertex.addToBranch(branch, curPoint.x);
+          vertex = parentVertex;
+          parentVertex = vertex.getNextParent();
+          if (parentVertex === null || parentVertexOnBranch) break;
+        }
       }
-      const midY = y1 + 1;
-      addLine(colour, { x: x1, y: y1 }, { x: x2, y: midY }, isCommitted);
-      if (midY !== y2) {
-        addVertical(colour, x2, midY, y2, isCommitted);
+      if (i === vertices.length && parentVertex !== null && parentVertex.id === NULL_VERTEX_ID) {
+        vertex.registerParentProcessed();
       }
+      branch.setEnd(i);
+      branches.push(branch);
+      availableColours[branch.getColour()] = i;
     }
   }
 
-  let maxX = 0;
-  for (const x of xOf) if (x > maxX) maxX = x;
-  const laneCount = Math.max(1, maxX + 1);
-
-  const vertices = commits.map((c, i) => ({
-    id: i,
-    x: xOf[i],
-    colour: colourOf[i],
-    isCommitted: c.hash !== UNCOMMITTED_HASH,
-    isCurrent:
-      (head !== null && c.hash === head) ||
-      (head === null && i === 0 && c.hash === UNCOMMITTED_HASH),
-    isStash: Boolean(c.stash),
-  }));
-
-  const branches: GraphLayout["branches"] = [];
-  for (const [colour, lines] of linesByColour) {
-    branches.push({ colour, lines });
+  let i = 0;
+  while (i < vertices.length) {
+    if (vertices[i].getNextParent() !== null || vertices[i].isNotOnBranch()) {
+      determinePath(i);
+    } else {
+      i++;
+    }
   }
+
+  let maxNextX = 0;
+  for (const v of vertices) {
+    const x = v.getNextPoint().x;
+    if (x > maxNextX) maxNextX = x;
+  }
+  const laneCount = Math.max(1, maxNextX);
 
   return {
-    vertices,
-    branches,
+    vertices: commits.map((c, idx) => ({
+      id: idx,
+      x: vertices[idx].getX(),
+      colour: vertices[idx].getColour(),
+      isCommitted: c.hash !== UNCOMMITTED_HASH,
+      isCurrent:
+        (head !== null && c.hash === head) ||
+        (head === null && idx === 0 && c.hash === UNCOMMITTED_HASH),
+      isStash: Boolean(c.stash),
+    })),
+    branches: branches.map((b) => ({ colour: b.getColour(), lines: b.lines })),
     laneCount,
     graphWidth: 2 * GRAPH_GRID.offsetX + Math.max(0, laneCount - 1) * GRAPH_GRID.x,
     grid: { ...GRAPH_GRID },

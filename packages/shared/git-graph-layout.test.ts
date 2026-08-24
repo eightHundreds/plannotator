@@ -24,7 +24,7 @@ describe("layoutGraph", () => {
     expect(layout.branches.some((b) => b.lines.length > 0)).toBe(true);
   });
 
-  test("places a stash on a fresh lane instead of looking up its hash", () => {
+  test("marks a stash vertex and still draws the edge to its base", () => {
     const layout = layoutGraph(
       [
         { hash: "s", parents: ["b"], stash: { selector: "stash@{0}", baseHash: "b" } },
@@ -39,9 +39,8 @@ describe("layoutGraph", () => {
   });
 
   test("two --no-ff merges of the same parent do not stack collinear verticals", () => {
-    // alpha and beta each --no-ff merge feature tip F. Gitlane paints a
-    // child-colour vertical on F's column for every such merge; vscode-git-graph
-    // joins the first rail. Newest-first order matches `git log --date-order`.
+    // alpha and beta each --no-ff merge feature tip F. vscode-git-graph joins
+    // the second merge onto the first rail (getPointConnectingTo).
     const commits = [
       { hash: "MA", parents: ["A2", "F2"] },
       { hash: "MB", parents: ["B3", "F2"] },
@@ -58,5 +57,28 @@ describe("layoutGraph", () => {
     expect(collinearVerticalOverlaps(layout)).toEqual([]);
     expect(layoutHasParentEdge(layout, 0, 4)).toBe(true);
     expect(layoutHasParentEdge(layout, 1, 4)).toBe(true);
+  });
+
+  test("a parent outside the loaded window still continues the branch to the last row", () => {
+    // Feature's parent is not in this page; main fills the rows below.
+    // gitlane dropped that edge; vscode-git-graph walks a null vertex to the end.
+    const layout = layoutGraph(
+      [
+        { hash: "feature", parents: ["not-loaded"] },
+        { hash: "m2", parents: ["m1"] },
+        { hash: "m1", parents: ["also-not-loaded"] },
+      ],
+      { head: "feature" },
+    );
+    const lastRow = layout.vertices.length - 1;
+    let featureMaxY = 0;
+    for (const branch of layout.branches) {
+      if (branch.colour !== layout.vertices[0].colour) continue;
+      for (const line of branch.lines) {
+        featureMaxY = Math.max(featureMaxY, line.p1.y, line.p2.y);
+      }
+    }
+    expect(featureMaxY).toBe(lastRow);
+    expect(layoutHasParentEdge(layout, 1, 2)).toBe(true);
   });
 });

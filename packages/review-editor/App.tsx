@@ -112,6 +112,7 @@ import { annotationMatchesPrScope, proseAnnotationMatchesPr } from './utils/anno
 import type { DiffOption, WorktreeInfo, GitContext, SinceBaseSections, CommitDiffInfo } from '@plannotator/shared/types';
 import { SectionsPanel } from './components/SectionsPanel';
 import { CommitsPanel } from './components/CommitsPanel';
+import { TruncatedPath } from './components/FileRowBits';
 import { useCommitsView } from './hooks/useCommitsView';
 import { ReviewSetupDialog } from './components/ReviewSetupDialog';
 import { initializeReviewSetup, markReviewSetupSeen } from './utils/reviewSetup';
@@ -3650,11 +3651,11 @@ const ReviewApp: React.FC = () => {
                 : 'min-w-0 flex flex-1 items-center gap-2 lg:gap-3 overflow-hidden'
               }>
                 <span
-                  className="min-w-0 max-w-[160px] xl:max-w-[240px] text-xs text-muted-foreground/60 hidden sm:inline-flex items-center gap-1"
+                  className="min-w-0 flex-1 text-xs text-muted-foreground/60 hidden sm:inline-flex items-center gap-1 overflow-hidden"
                   title={displayRepo}
                 >
                   <RepoIcon className="w-3 h-3 flex-shrink-0" />
-                  <span className="truncate">{displayRepo}</span>
+                  <TruncatedPath path={displayRepo} />
                 </span>
                 <PRSelector
                   mrNumberLabel={mrNumberLabel}
@@ -3684,18 +3685,18 @@ const ReviewApp: React.FC = () => {
               }>
                 {repoInfo.branch && (
                   <span
-                    className="text-xs font-mono text-foreground truncate"
+                    className="text-xs font-mono text-foreground truncate shrink min-w-0 max-w-[40%]"
                     title={repoInfo.branch}
                   >
                     {repoInfo.branch}
                   </span>
                 )}
                 <span
-                  className="text-xs text-muted-foreground/60 inline-flex items-center gap-1 truncate max-w-[220px]"
+                  className="min-w-0 flex-1 text-xs text-muted-foreground/60 inline-flex items-center gap-1 overflow-hidden"
                   title={repoInfo.display}
                 >
                   <RepoIcon className="w-3 h-3 flex-shrink-0" />
-                  {repoInfo.display}
+                  <TruncatedPath path={repoInfo.display} />
                 </span>
               </div>
             ) : (
