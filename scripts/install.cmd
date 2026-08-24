@@ -210,7 +210,7 @@ if /i "!PLANNOTATOR_MINIMAL!"=="yes"  set "MINIMAL=1"
 if "!MINIMAL_FLAG!"=="1" set "MINIMAL=1"
 if "!MINIMAL_FLAG!"=="0" set "MINIMAL=0"
 
-set "REPO=backnotprop/plannotator"
+set "REPO=eightHundreds/plannotator"
 set "SEM_REPO=Ataraxy-Labs/sem"
 set "SEM_VERSION=v0.8.0"
 set "INSTALL_DIR=%USERPROFILE%\.local\bin"

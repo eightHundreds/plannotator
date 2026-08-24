@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-REPO="backnotprop/plannotator"
+REPO="eightHundreds/plannotator"
 SEM_REPO="Ataraxy-Labs/sem"
 SEM_VERSION="v0.8.0"
 INSTALL_DIR="$HOME/.local/bin"

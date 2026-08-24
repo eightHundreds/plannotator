@@ -1,13 +1,10 @@
 {
-  "name": "@aoligiegie/plannotator-pi-extension",
-  "version": "0.27.6",
+  "name": "@plannotator/pi-extension",
+  "version": "0.27.7",
   "type": "module",
   "description": "Plannotator Pi extension - interactive plan review with annotations, annotate agent messages, and review code/PRs",
   "author": "backnotprop",
   "license": "MIT OR Apache-2.0",
-  "publishConfig": {
-    "access": "public"
-  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/eightHundreds/plannotator.git",

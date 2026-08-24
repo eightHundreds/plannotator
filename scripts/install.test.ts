@@ -2564,7 +2564,7 @@ function runPs1SkillsCheckout(git: GitBehavior): { code: number; out: string; ho
 
   const driver = [
     `$ErrorActionPreference = "Stop"`,
-    `$repo = "backnotprop/plannotator"`,
+    `$repo = "eightHundreds/plannotator"`,
     `$latestTag = "v9.9.9"`,
     `$skipSkillsResolved = $false`,
     `$skipKiroResolved = $true`,

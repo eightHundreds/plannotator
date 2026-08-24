@@ -56,7 +56,7 @@ if ($env:PLANNOTATOR_MINIMAL -match '^(1|true|yes)$') {
 if ($Minimal) { $minimal = $true }
 if ($NoMinimal) { $minimal = $false }
 
-$repo = "backnotprop/plannotator"
+$repo = "eightHundreds/plannotator"
 $semRepo = "Ataraxy-Labs/sem"
 $semVersion = "v0.8.0"
 $installDir = "$env:LOCALAPPDATA\plannotator"
