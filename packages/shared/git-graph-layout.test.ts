@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { layoutGraph, layoutHasParentEdge } from "./git-graph-layout";
+import {
+  collinearVerticalOverlaps,
+  layoutGraph,
+  layoutHasParentEdge,
+} from "./git-graph-layout";
 
 describe("layoutGraph", () => {
   test("assigns multiple lanes and parent edges for a branch+merge graph", () => {
@@ -32,5 +36,27 @@ describe("layoutGraph", () => {
     expect(layout.vertices[0].isStash).toBe(true);
     expect(layout.vertices[1].isStash).toBe(false);
     expect(layoutHasParentEdge(layout, 0, 1)).toBe(true);
+  });
+
+  test("two --no-ff merges of the same parent do not stack collinear verticals", () => {
+    // alpha and beta each --no-ff merge feature tip F. Gitlane paints a
+    // child-colour vertical on F's column for every such merge; vscode-git-graph
+    // joins the first rail. Newest-first order matches `git log --date-order`.
+    const commits = [
+      { hash: "MA", parents: ["A2", "F2"] },
+      { hash: "MB", parents: ["B3", "F2"] },
+      { hash: "A2", parents: ["A1"] },
+      { hash: "B3", parents: ["B2"] },
+      { hash: "F2", parents: ["F1"] },
+      { hash: "A1", parents: ["base"] },
+      { hash: "B2", parents: ["B1"] },
+      { hash: "F1", parents: ["base"] },
+      { hash: "B1", parents: ["base"] },
+      { hash: "base", parents: [] },
+    ];
+    const layout = layoutGraph(commits, { head: "MB" });
+    expect(collinearVerticalOverlaps(layout)).toEqual([]);
+    expect(layoutHasParentEdge(layout, 0, 4)).toBe(true);
+    expect(layoutHasParentEdge(layout, 1, 4)).toBe(true);
   });
 });
