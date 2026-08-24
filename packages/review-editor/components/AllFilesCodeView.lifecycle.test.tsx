@@ -397,6 +397,52 @@ describe('AllFilesCodeView readOnly (portable guide host)', () => {
     }
   });
 
+  test.skipIf(!hasDom)('suspendFileContent skips /api/file-content so the commits graph can load', async () => {
+    const originalFetch = globalThis.fetch;
+    const calls: string[] = [];
+    globalThis.fetch = ((input: RequestInfo | URL) => {
+      calls.push(String(input));
+      return Promise.resolve(new Response(JSON.stringify({ oldContent: null, newContent: null }), { status: 200 }));
+    }) as typeof fetch;
+    try {
+      await mount({ isActive: true, suspendFileContent: true });
+      const options = lastCodeViewProps?.options as { onPostRender?: (...args: unknown[]) => void };
+      await act(async () => {
+        options.onPostRender?.(document.createElement('div'), {}, 'mount', { item: { id: 'target.ts', type: 'diff' } });
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      });
+      expect(calls.filter((url) => url.includes('/api/file-content'))).toHaveLength(0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test.skipIf(!hasDom)('lifting suspendFileContent retries the skipped file-content fetch', async () => {
+    const originalFetch = globalThis.fetch;
+    const calls: string[] = [];
+    globalThis.fetch = ((input: RequestInfo | URL) => {
+      calls.push(String(input));
+      return Promise.resolve(new Response(JSON.stringify({ oldContent: null, newContent: null }), { status: 200 }));
+    }) as typeof fetch;
+    try {
+      await mount({ isActive: true, suspendFileContent: true });
+      const options = lastCodeViewProps?.options as { onPostRender?: (...args: unknown[]) => void };
+      await act(async () => {
+        options.onPostRender?.(document.createElement('div'), {}, 'mount', { item: { id: 'target.ts', type: 'diff' } });
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      });
+      expect(calls.filter((url) => url.includes('/api/file-content'))).toHaveLength(0);
+
+      await render({ isActive: true, suspendFileContent: false });
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      });
+      expect(calls.filter((url) => url.includes('/api/file-content'))).toHaveLength(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test.skipIf(!hasDom)('does not install the window keydown handler', async () => {
     const originalAdd = window.addEventListener;
     const keydownAdds: number[] = [];

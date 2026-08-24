@@ -22,6 +22,19 @@ export function isCommitDiffType(fullDiffType: string): boolean {
 }
 
 /**
+ * True when leaving a commit-family view (Tree exit, Uncommitted click)
+ * should issue a restore switch: a commit diff is on screen, or one is
+ * inbound (HEAD auto-select captured the memo then kicked off the fetch).
+ */
+export function commitDiffRestorePending(
+  diffType: string,
+  isLoadingDiff: boolean,
+  hasRestoreMemo: boolean,
+): boolean {
+  return isCommitDiffType(diffType) || (isLoadingDiff && hasRestoreMemo);
+}
+
+/**
  * Resolve the diff to switch to when the panel view leaves Commits while a
  * commit diff is active. The memo — captured when the session first entered
  * the commit family — wins verbatim (full diff type + base, so the restore

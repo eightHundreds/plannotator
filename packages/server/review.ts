@@ -33,9 +33,10 @@ import {
 } from "@plannotator/shared/gitbutler-core";
 import {
   getCommitDiffInfo,
-  listCommitHistory,
   type CommitDiffInfo,
 } from "@plannotator/shared/commit-history";
+import { listCommitGraph, getTagDetails } from "@plannotator/shared/git-graph-history";
+import { GitGraphActionError, GIT_GRAPH_ACTION_NAMES, runGitGraphAction } from "@plannotator/shared/git-graph-actions";
 import { resolvePoolCwd } from "@plannotator/shared/worktree-pool";
 import {
   createDefaultSemanticDiffRuntime,
@@ -2218,12 +2219,10 @@ export async function startReviewServer(
             }
           }
 
-          // API: Linear commit history for the Commits panel. Git-local
-          // sessions only — PR/workspace/jj/p4 don't offer the view (same
-          // gate the client's commitsCapable applies). Computed against the
-          // same cwd as the active diff so worktree sessions list the
-          // worktree's history, and against the active base so the divider
-          // matches the review baseline.
+          // API: Commit graph for the Commits panel. Git-local sessions only —
+          // PR/workspace/jj/p4 don't offer the view (same gate the client's
+          // commitsCapable applies). Computed against the same cwd as the
+          // active diff so worktree sessions list the worktree's history.
           if (url.pathname === "/api/commits" && req.method === "GET") {
             if (!gitContext || isPRMode || workspace || (sessionVcsType && sessionVcsType !== "git")) {
               return Response.json(
@@ -2232,11 +2231,19 @@ export async function startReviewServer(
               );
             }
             const limitParam = Number.parseInt(url.searchParams.get("limit") ?? "", 10);
-            const before = url.searchParams.get("before") ?? undefined;
+            const flag = (key: string, fallback = true) => {
+              const v = url.searchParams.get(key);
+              if (v == null || v === "") return fallback;
+              return v !== "0" && v !== "false";
+            };
+            const branch = url.searchParams.get("branch") ?? "";
             const commitsCwd = resolveVcsCwd(currentDiffType as DiffType, gitContext.cwd);
-            const page = await listCommitHistory(gitRuntime, currentBase, commitsCwd, {
+            const page = await listCommitGraph(gitRuntime, currentBase, commitsCwd, {
               ...(Number.isFinite(limitParam) && { limit: limitParam }),
-              ...(before !== undefined && { before }),
+              showRemoteBranches: flag("remotes"),
+              showStashes: flag("stashes"),
+              showTags: flag("tags"),
+              ...(branch ? { branches: [branch] } : {}),
             });
             if (!page) {
               return Response.json({ error: "Could not read commit history" }, { status: 500 });
@@ -2245,13 +2252,59 @@ export async function startReviewServer(
             // session; misses just render the initials fallback client-side).
             const avatars = await commitAvatars.resolve(
               commitsCwd,
-              page.commits.map((c) => c.authorEmail),
+              page.commits.map((c) => c.authorEmail).filter((e) => e && e !== "*"),
             );
             for (const c of page.commits) {
               const avatarUrl = avatars.get(c.authorEmail);
               if (avatarUrl) c.avatarUrl = avatarUrl;
             }
             return Response.json(page);
+          }
+
+          // API: Git write actions from the commit-graph context menus.
+          if (url.pathname === "/api/git-graph/action" && req.method === "POST") {
+            if (!gitContext || isPRMode || workspace || (sessionVcsType && sessionVcsType !== "git")) {
+              return Response.json(
+                { error: "Git graph actions are only available for local git reviews" },
+                { status: 400 },
+              );
+            }
+            try {
+              const body = (await req.json()) as { action?: unknown; params?: unknown };
+              if (typeof body.action !== "string" || !GIT_GRAPH_ACTION_NAMES.includes(body.action)) {
+                return Response.json({ error: "Unknown action" }, { status: 400 });
+              }
+              const params =
+                body.params && typeof body.params === "object" && !Array.isArray(body.params)
+                  ? body.params as Record<string, unknown>
+                  : {};
+              const actionCwd = resolveVcsCwd(currentDiffType as DiffType, gitContext.cwd);
+              await runGitGraphAction(gitRuntime, body.action, params, actionCwd);
+              return Response.json({ ok: true });
+            } catch (err) {
+              const message = err instanceof Error ? err.message : "Git action failed";
+              const status = err instanceof GitGraphActionError ? 400 : 500;
+              return Response.json({ error: message }, { status });
+            }
+          }
+
+          if (url.pathname === "/api/git-graph/tag" && req.method === "GET") {
+            if (!gitContext || isPRMode || workspace || (sessionVcsType && sessionVcsType !== "git")) {
+              return Response.json(
+                { error: "Commit history is only available for local git reviews" },
+                { status: 400 },
+              );
+            }
+            const name = url.searchParams.get("name") ?? "";
+            if (!name) return Response.json({ error: "Missing tag name" }, { status: 400 });
+            try {
+              const tagCwd = resolveVcsCwd(currentDiffType as DiffType, gitContext.cwd);
+              const details = await getTagDetails(gitRuntime, name, tagCwd);
+              return Response.json(details);
+            } catch (err) {
+              const message = err instanceof Error ? err.message : "Failed to read tag";
+              return Response.json({ error: message }, { status: 400 });
+            }
           }
 
           // API: Switch diff type (requires local file access)

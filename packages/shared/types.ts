@@ -22,6 +22,13 @@ export type {
 } from "./commit-history";
 
 export type {
+  CommitGraphEntry,
+  CommitGraphPage,
+} from "./git-graph-history";
+
+export type { GraphLayout } from "./git-graph-layout";
+
+export type {
   WorkspaceDiffType,
   WorkspaceRepoState,
   WorkspaceReviewState,

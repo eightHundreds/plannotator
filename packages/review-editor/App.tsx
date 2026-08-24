@@ -116,7 +116,7 @@ import { useCommitsView } from './hooks/useCommitsView';
 import { ReviewSetupDialog } from './components/ReviewSetupDialog';
 import { initializeReviewSetup, markReviewSetupSeen } from './utils/reviewSetup';
 import { resolvePanelView } from './utils/resolvePanelView';
-import { isCommitDiffType, resolveCommitExitDiff, type CommitViewRestoreTarget } from './utils/commitViewRestore';
+import { commitDiffRestorePending, isCommitDiffType, resolveCommitExitDiff, type CommitViewRestoreTarget } from './utils/commitViewRestore';
 import { GuideIntroDialog } from './components/GuideIntroDialog';
 import { needsGuideIntro, markGuideIntroSeen, needsGuideHint, markGuideHintSeen } from './utils/guideIntro';
 import { EditModeAnnouncementDialog } from './components/EditModeAnnouncementDialog';
@@ -1117,7 +1117,7 @@ const ReviewApp: React.FC = () => {
   });
   const fileTreeResize = useResizablePanel({
     storageKey: 'plannotator-filetree-width',
-    defaultWidth: 256, minWidth: 160, maxWidth: 400, side: 'left',
+    defaultWidth: 256, minWidth: 160, maxWidth: 520, side: 'left',
     onSnapClose: () => setIsFileTreeOpen(false),
     // Single click on the handle (no drag) collapses it.
     onClick: () => setIsFileTreeOpen(false),
@@ -2487,7 +2487,7 @@ const ReviewApp: React.FC = () => {
       // before that fetch, so memo + loading means a commit diff is inbound;
       // issuing the restore now supersedes it server-side (epoch guard) and
       // its stale body is ignored client-side.
-      (isCommitDiffType(diffType) || (isLoadingDiff && preCommitDiffRef.current !== null))
+      commitDiffRestorePending(diffType, isLoadingDiff, preCommitDiffRef.current !== null)
     ) {
       // Restore through fetchDiffSwitch with the memo's FULL diff type (not
       // handleDiffSwitch, which would re-compose the current worktree prefix
@@ -2551,6 +2551,26 @@ const ReviewApp: React.FC = () => {
     diffError,
     onOpenCommit: handleSelectCommit,
   });
+
+  // Uncommitted graph node → restore the review the session came from (working
+  // tree / since-base), not a historical commit. Same in-flight arm as Tree
+  // exit: the HEAD auto-select captures the memo and starts a switch before
+  // diffType flips, so a click that only openAllFilesPanel() would lose when
+  // that response lands. dismissAutoSelect also wins the race where the graph
+  // has painted but the auto-select effect has not run yet.
+  const handleSelectUncommitted = useCallback(() => {
+    commitsView.dismissAutoSelect();
+    if (!commitDiffRestorePending(diffType, isLoadingDiff, preCommitDiffRef.current !== null)) {
+      openAllFilesPanel();
+      return;
+    }
+    const target = resolveCommitExitDiff(preCommitDiffRef.current, {
+      preferredDefault: configStore.get('defaultDiffType'),
+      diffOptions: gitContext?.diffOptions ?? [],
+      activeWorktreePath,
+    });
+    void fetchDiffSwitch(target.diffType, target.base ?? undefined);
+  }, [commitsView.dismissAutoSelect, diffType, isLoadingDiff, gitContext, activeWorktreePath, fetchDiffSwitch, openAllFilesPanel]);
 
   // Reload un-trap: the server keeps ONE session-global diff, so a page
   // loaded while a commit:<sha> diff is active is served that commit — but
@@ -3016,6 +3036,7 @@ const ReviewApp: React.FC = () => {
     registerAllFilesCollapseToggle,
     onAllFilesCollapsedChange: setAllFilesAllCollapsed,
     commitInfo,
+    suspendFileContent: showCommitsPanel && commitsView.veilActive,
     isSemanticDiffActive,
     semanticDiffAvailable: semanticDiffUsable,
     onSemanticDiffUnavailable: handleSemanticDiffUnavailable,
@@ -3056,7 +3077,7 @@ const ReviewApp: React.FC = () => {
     handleAskAI, handleAskAIForFile, handleViewAIResponse, handleClickAIMarker,
     aiHistoryForSelection, getAIHistoryForFile, agentJobs.jobs, prMetadata, prContext, prArtifacts,
     isPRContextLoading, prContextError, fetchPRContext, platformUser, openDiffFile,
-    handleOpenTour, handleOpenGuide, isAllFilesActive, allFilesOrder, allFilesAllCollapsed, onToggleAllFilesCollapsed, registerAllFilesCollapseToggle, commitInfo, isSemanticDiffActive, semanticDiffUsable,
+    handleOpenTour, handleOpenGuide, isAllFilesActive, allFilesOrder, allFilesAllCollapsed, onToggleAllFilesCollapsed, registerAllFilesCollapseToggle, commitInfo, showCommitsPanel, commitsView.veilActive, isSemanticDiffActive, semanticDiffUsable,
     handleSemanticDiffUnavailable, handleSemanticDiffLoadError, handleSemanticDiffLoadSuccess, handleAddAnnotationForFile,
     callFlowAvailable, callFlowAdvert, callFlowAnalysis, retryCallFlowAnalysis, isCallFlowNodeInPatch, isCallFlowActive, openCallFlowPanel, callFlowInstall,
     editSuggestionsEnabled, handleAddSuggestionsForFile, handleAddEditorCommentForFile,
@@ -4184,17 +4205,32 @@ const ReviewApp: React.FC = () => {
               <CommitsPanel
                 width={fileTreeResize.width}
                 commits={commitsView.commits}
-                base={commitsView.base}
+                layout={commitsView.layout}
+                branch={commitsView.branch}
+                remotes={commitsView.remotes}
+                branches={commitsView.branches}
                 hasMore={commitsView.hasMore}
                 isLoading={commitsView.isLoading}
                 isLoadingMore={commitsView.isLoadingMore}
                 error={commitsView.error}
                 activeCommitSha={activeCommitSha}
+                uncommittedActive={showCommitsPanel && !isCommitDiffType(diffType)}
                 onSelectCommit={(sha) => completeNavigatorSelection(() => handleSelectCommit(sha))}
+                onSelectUncommitted={() => completeNavigatorSelection(handleSelectUncommitted)}
                 onShowMore={commitsView.showMore}
                 onRetry={commitsView.refresh}
+                onHistoryMutated={() => {
+                  commitsView.refresh();
+                  void fetchDiffSwitch(diffType, selectedBase, { preserveFile: true });
+                }}
                 onSelectPanelView={handlePanelViewSelect}
                 showSectionsOption={sectionsCapable}
+                showRemotes={commitsView.showRemotes}
+                onShowRemotesChange={commitsView.setShowRemotes}
+                showStashes={commitsView.showStashes}
+                onShowStashesChange={commitsView.setShowStashes}
+                branchFilter={commitsView.branchFilter}
+                onBranchFilterChange={commitsView.setBranchFilter}
               />
             </ReviewNavigatorContainer>
           )}

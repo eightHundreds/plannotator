@@ -1,12 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { CommitHistoryPage, CommitListEntry } from '@plannotator/shared/types';
+import type { CommitGraphEntry, CommitGraphPage, GraphLayout } from '@plannotator/shared/git-graph-history';
+import { UNCOMMITTED_HASH } from '@plannotator/shared/git-graph-history';
 
 const PAGE_SIZE = 50;
-// Quiet head-compare poll cadence while the Commits view is visible. The
-// commit diff itself is immutable (sha-anchored fingerprint — the staleness
-// banner correctly never fires for it), so the RAIL needs its own freshness:
-// an agent committing while the user walks history must show up without
-// leaving and re-entering the view.
 const POLL_INTERVAL_MS = 10_000;
 
 interface UseCommitsViewOptions {
@@ -28,34 +24,41 @@ interface UseCommitsViewOptions {
 }
 
 interface UseCommitsViewReturn {
-  commits: CommitListEntry[];
-  /** Base ref the divider represents (server echo), null before first load. */
+  commits: CommitGraphEntry[];
+  layout: GraphLayout | null;
+  /** Base ref echoed from the review session. */
   base: string | null;
+  head: string | null;
+  branch: string | null;
+  detached: boolean;
+  remotes: string[];
+  branches: string[];
   hasMore: boolean;
   isLoading: boolean;
   isLoadingMore: boolean;
   error: string | null;
   showMore: () => void;
-  /** Reload from page one (e.g. after a staleness refresh picked up new
-   * commits). Keeps the current list on screen while reloading. */
   refresh: () => void;
-  /** Cover the center dock while commit navigation settles: a switch in
-   * flight, the log loading, or the loaded-list frame before auto-select
-   * lands. Every terminal state drops it — switch error (diffError → the
-   * normal error state), log error (rail shows Retry), and a genuinely empty
-   * history (zero commits, nothing to select). */
   veilActive: boolean;
+  /** Pin auto-select as done so a user click (Uncommitted) cannot lose a race
+   * against the HEAD-open effect that runs after the graph paints. */
+  dismissAutoSelect: () => void;
+  showRemotes: boolean;
+  setShowRemotes: (value: boolean) => void;
+  showStashes: boolean;
+  setShowStashes: (value: boolean) => void;
+  branchFilter: string;
+  setBranchFilter: (value: string) => void;
+}
+
+function fingerprint(page: Pick<CommitGraphPage, 'commits' | 'head' | 'branch' | 'base'>): string {
+  return `${page.head ?? ''}|${page.branch ?? ''}|${page.base}|${page.commits.map((c) => c.sha).join(',')}`;
 }
 
 /**
- * The Commits-view session machine: pages `GET /api/commits`, keeps the rail
- * fresh (quiet poll), auto-opens HEAD once per entry, and derives the
- * center-dock veil. It all lives HERE so the invariants between the list
- * cache, the poll, the auto-select, and the veil stay locally checkable —
- * they were previously split across App.tsx, and every sync bug found in
- * review lived at that seam. Generation-guarded: a response from a
- * superseded fetch (context changed, refresh fired, poll adopted) is dropped
- * so it can't overwrite newer state.
+ * The Commits-view session machine: pages `GET /api/commits` as a graph,
+ * keeps the rail fresh (quiet poll), auto-opens HEAD once per entry, and
+ * derives the center-dock veil.
  */
 export function useCommitsView({
   enabled,
@@ -65,113 +68,117 @@ export function useCommitsView({
   diffError,
   onOpenCommit,
 }: UseCommitsViewOptions): UseCommitsViewReturn {
-  const [commits, setCommits] = useState<CommitListEntry[]>([]);
+  const [commits, setCommits] = useState<CommitGraphEntry[]>([]);
+  const [layout, setLayout] = useState<GraphLayout | null>(null);
   const [base, setBase] = useState<string | null>(null);
+  const [head, setHead] = useState<string | null>(null);
+  const [branch, setBranch] = useState<string | null>(null);
+  const [detached, setDetached] = useState(false);
+  const [remotes, setRemotes] = useState<string[]>([]);
+  const [branches, setBranches] = useState<string[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [limit, setLimit] = useState(PAGE_SIZE);
+  const [showRemotes, setShowRemotes] = useState(true);
+  const [showStashes, setShowStashes] = useState(true);
+  const [branchFilter, setBranchFilter] = useState('');
+  const [railSettled, setRailSettled] = useState(false);
   const generationRef = useRef(0);
   const commitsRef = useRef(commits);
   commitsRef.current = commits;
-  const baseRef = useRef(base);
-  baseRef.current = base;
+  const fingerprintRef = useRef('');
+  const limitRef = useRef(limit);
+  limitRef.current = limit;
+  const queryRef = useRef({ showRemotes, showStashes, branchFilter });
+  queryRef.current = { showRemotes, showStashes, branchFilter };
 
-  const fetchPage = useCallback(async (before?: string) => {
+  const applyPage = (data: CommitGraphPage) => {
+    setCommits(data.commits);
+    setLayout(data.layout);
+    setBase(data.base || null);
+    setHead(data.head || null);
+    setBranch(data.branch || null);
+    setDetached(Boolean(data.detached));
+    setRemotes(data.remotes || []);
+    setBranches(data.branches || []);
+    setHasMore(data.hasMore);
+    fingerprintRef.current = fingerprint(data);
+  };
+
+  const fetchGraph = useCallback(async (opts?: { more?: boolean; silent?: boolean }) => {
     const generation = ++generationRef.current;
-    const setBusy = before ? setIsLoadingMore : setIsLoading;
-    setBusy(true);
-    // A page-1 fetch supersedes any in-flight paging request, whose
-    // generation-skipped `finally` will never clear its own flag — reset it
-    // here or "Show more" stays stuck disabled as "Loading…".
-    if (!before) setIsLoadingMore(false);
-    setError(null);
+    const nextLimit = opts?.more ? limitRef.current + PAGE_SIZE : limitRef.current;
+    if (opts?.more) setLimit(nextLimit);
+    if (!opts?.silent) {
+      if (opts?.more) setIsLoadingMore(true);
+      else setIsLoading(true);
+    }
+    if (!opts?.more) setIsLoadingMore(false);
+    if (!opts?.silent) setError(null);
     try {
-      const params = new URLSearchParams({ limit: String(PAGE_SIZE) });
-      if (before) params.set('before', before);
+      const q = queryRef.current;
+      const params = new URLSearchParams({ limit: String(nextLimit) });
+      if (!q.showRemotes) params.set('remotes', '0');
+      if (!q.showStashes) params.set('stashes', '0');
+      if (q.branchFilter) params.set('branch', q.branchFilter);
       const res = await fetch(`/api/commits?${params}`);
-      const data = (await res.json()) as CommitHistoryPage & { error?: string };
+      const data = (await res.json()) as CommitGraphPage & { error?: string };
       if (generation !== generationRef.current) return;
       if (!res.ok || data.error) throw new Error(data.error || 'Failed to load commits');
-      setCommits((prev) => {
-        if (!before) return data.commits;
-        // Append, deduping on sha — a concurrent refresh or a history that
-        // moved between pages could otherwise repeat rows.
-        const seen = new Set(prev.map((c) => c.sha));
-        return [...prev, ...data.commits.filter((c) => !seen.has(c.sha))];
-      });
-      setBase(data.base || null);
-      setHasMore(data.hasMore);
+      applyPage(data);
+      if (opts?.more) limitRef.current = nextLimit;
     } catch (err) {
       if (generation !== generationRef.current) return;
-      setError(err instanceof Error ? err.message : 'Failed to load commits');
+      if (!opts?.silent) {
+        setError(err instanceof Error ? err.message : 'Failed to load commits');
+      }
     } finally {
-      if (generation === generationRef.current) setBusy(false);
+      if (generation === generationRef.current) {
+        setIsLoading(false);
+        setIsLoadingMore(false);
+      }
     }
   }, []);
 
-  // The context key the current list was loaded for. Re-entering the view
-  // with the SAME key keeps the cached list (no empty flash before the
-  // refetch); a DIFFERENT key (worktree/base switch while the view was away)
-  // clears it first — consumers like the HEAD auto-select must never act on
-  // rows that belong to another history.
   const loadedContextKeyRef = useRef<string | null>(null);
   useEffect(() => {
     if (!enabled) return;
     if (loadedContextKeyRef.current !== contextKey) {
       loadedContextKeyRef.current = contextKey;
       setCommits([]);
+      setLayout(null);
       setBase(null);
       setHasMore(false);
+      setLimit(PAGE_SIZE);
+      limitRef.current = PAGE_SIZE;
+      fingerprintRef.current = '';
     }
-    void fetchPage();
-    // On disable, invalidate in-flight fetches AND reset their loading flags:
-    // a generation-skipped `finally` never clears them, which left "Show more"
-    // stuck disabled as "Loading…" after leaving mid-page.
+    void fetchGraph();
     return () => {
       generationRef.current++;
       setIsLoading(false);
       setIsLoadingMore(false);
     };
-  }, [enabled, contextKey, fetchPage]);
+  }, [enabled, contextKey, fetchGraph, showRemotes, showStashes, branchFilter]);
 
-  // Quiet freshness poll: fetch page 1 and adopt it ONLY when what the rail
-  // shows would actually change — a new head (commits landed / history
-  // rewritten), a moved base boundary (an agent ran `git fetch` and
-  // origin/<base> advanced while HEAD stayed put), or a relabeled base. No
-  // loading flags and no error-state churn — a transient network blip during
-  // a background check must not disturb the rail the user is reading.
-  // Adopting bumps the generation so an in-flight "Show more" from the OLD
-  // history can't append its stale rows.
   const checkForNewCommits = useCallback(async () => {
     const generation = generationRef.current;
     try {
-      const res = await fetch(`/api/commits?limit=${PAGE_SIZE}`);
+      const q = queryRef.current;
+      const params = new URLSearchParams({ limit: String(limitRef.current) });
+      if (!q.showRemotes) params.set('remotes', '0');
+      if (!q.showStashes) params.set('stashes', '0');
+      if (q.branchFilter) params.set('branch', q.branchFilter);
+      const res = await fetch(`/api/commits?${params}`);
       if (!res.ok) return;
-      const data = (await res.json()) as CommitHistoryPage & { error?: string };
+      const data = (await res.json()) as CommitGraphPage & { error?: string };
       if (data.error) return;
       if (generation !== generationRef.current) return;
-      const current = commitsRef.current;
-      const sameHead = data.commits[0]?.sha === current[0]?.sha;
-      // Boundary compared over the overlap window: the current list may be
-      // paged deeper than the poll's single page, and a boundary that sits
-      // beyond both is invisible to the probe (accepted micro-edge — the
-      // divider that deep re-syncs on the next full reload).
-      const window = Math.min(data.commits.length, current.length);
-      const boundaryIn = (list: readonly CommitListEntry[]): number => {
-        for (let i = 0; i < window; i++) if (list[i].isPastBase) return i;
-        return -1;
-      };
-      const sameBoundary = boundaryIn(data.commits) === boundaryIn(current);
-      const sameBase = (data.base || null) === baseRef.current;
-      if (sameHead && sameBoundary && sameBase) return;
+      if (fingerprint(data) === fingerprintRef.current) return;
       generationRef.current++;
-      setCommits(data.commits);
-      setBase(data.base || null);
-      setHasMore(data.hasMore);
-      // Adoption invalidated any in-flight fetches, whose generation-skipped
-      // `finally` blocks won't clear their own flags — and any lingering
-      // error belongs to the history this just replaced.
+      applyPage(data);
       setIsLoading(false);
       setIsLoadingMore(false);
       setError(null);
@@ -189,41 +196,72 @@ export function useCommitsView({
   }, [enabled, checkForNewCommits]);
 
   const showMore = useCallback(() => {
-    const last = commitsRef.current[commitsRef.current.length - 1];
-    if (last) void fetchPage(last.sha);
-  }, [fetchPage]);
+    void fetchGraph({ more: true });
+  }, [fetchGraph]);
 
   const refresh = useCallback(() => {
-    void fetchPage();
-  }, [fetchPage]);
+    void fetchGraph();
+  }, [fetchGraph]);
 
-  // Auto-open the HEAD commit once per entry so the center immediately
-  // matches the rail. Fires once (ref-guarded): a user click, an already-
-  // active commit diff, or a failed switch must not re-trigger it. Never
-  // fires while any diff switch is in flight — whatever is loading already
-  // owns the center; the effect re-runs when the switch settles. When entry
-  // races the first log fetch, it fires as soon as the log lands.
   const autoSelectDone = useRef(false);
   useEffect(() => {
     if (!enabled) {
       autoSelectDone.current = false;
+      setRailSettled(false);
+      return;
+    }
+    if (activeCommitSha && activeCommitSha !== UNCOMMITTED_HASH) {
+      autoSelectDone.current = true;
+      setRailSettled(true);
       return;
     }
     if (autoSelectDone.current) return;
-    if (activeCommitSha) {
-      autoSelectDone.current = true;
+    if (isLoadingDiff) return;
+    const headCommit = commits.find((c) => c.isHead) ?? commits.find((c) => c.sha !== UNCOMMITTED_HASH);
+    if (!headCommit) {
+      // Only the uncommitted node (or a truly empty graph) — nothing to auto-open.
+      if (!isLoading && commits.length > 0) {
+        autoSelectDone.current = true;
+        setRailSettled(true);
+      }
       return;
     }
-    if (isLoadingDiff) return;
-    const head = commits.find((c) => c.isHead) ?? commits[0];
-    if (!head) return;
     autoSelectDone.current = true;
-    onOpenCommit(head.sha);
-  }, [enabled, activeCommitSha, isLoadingDiff, commits, onOpenCommit]);
+    setRailSettled(true);
+    onOpenCommit(headCommit.sha);
+  }, [enabled, activeCommitSha, isLoadingDiff, isLoading, commits, onOpenCommit]);
+
+  const dismissAutoSelect = useCallback(() => {
+    autoSelectDone.current = true;
+    setRailSettled(true);
+  }, []);
 
   const veilActive =
     enabled && !diffError && !error &&
-    (isLoadingDiff || (!activeCommitSha && (isLoading || commits.length > 0)));
+    (isLoadingDiff || (!railSettled && (isLoading || commits.length > 0)));
 
-  return { commits, base, hasMore, isLoading, isLoadingMore, error, showMore, refresh, veilActive };
+  return {
+    commits,
+    layout,
+    base,
+    head,
+    branch,
+    detached,
+    remotes,
+    branches,
+    hasMore,
+    isLoading,
+    isLoadingMore,
+    error,
+    showMore,
+    refresh,
+    veilActive,
+    dismissAutoSelect,
+    showRemotes,
+    setShowRemotes,
+    showStashes,
+    setShowStashes,
+    branchFilter,
+    setBranchFilter,
+  };
 }

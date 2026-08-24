@@ -2849,3 +2849,111 @@ diffs-container {
 .review-comment-markdown {
   overflow-wrap: anywhere;
 }
+
+/* =====================================================
+   Commit graph (Commits panel)
+   ===================================================== */
+
+.pn-commit-graph {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 2;
+  pointer-events: none;
+  display: block;
+  max-width: none;
+}
+
+.pn-commit-graph circle {
+  pointer-events: all;
+  cursor: pointer;
+}
+
+.pn-commit-graph circle.current {
+  stroke-width: 2;
+  fill: var(--background);
+}
+
+.pn-commit-graph circle:not(.current) {
+  stroke: var(--background);
+  stroke-width: 1;
+}
+
+.pn-commit-graph circle.stashOuter {
+  fill: none;
+}
+
+.pn-commit-graph path.shadow {
+  fill: none;
+  stroke: var(--background);
+  stroke-opacity: 0.75;
+  stroke-width: 4;
+}
+
+.pn-commit-graph path.line {
+  fill: none;
+  stroke-width: 2;
+}
+
+.pn-git-refs {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  max-width: 55%;
+  overflow: hidden;
+}
+
+.pn-git-ref {
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: color-mix(in oklab, var(--muted) 70%, transparent);
+  font-size: 10px;
+  line-height: 16px;
+  flex-shrink: 0;
+  overflow: hidden;
+  max-width: 100%;
+  cursor: context-menu;
+}
+
+.pn-git-ref.active {
+  border-color: var(--pn-git-ref-color, var(--primary));
+}
+
+.pn-git-ref.active .pn-git-ref-name {
+  font-weight: 600;
+}
+
+.pn-git-ref-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 16px;
+  background: var(--pn-git-ref-color, var(--primary));
+  color: var(--background);
+  flex-shrink: 0;
+}
+
+.pn-git-ref.tag .pn-git-ref-icon {
+  background: var(--accent);
+}
+
+.pn-git-ref-name {
+  padding: 0 4px;
+  max-width: 92px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pn-git-ref-remote {
+  padding: 0 4px;
+  border-left: 1px solid var(--border);
+  font-style: italic;
+  color: var(--muted-foreground);
+  cursor: context-menu;
+}

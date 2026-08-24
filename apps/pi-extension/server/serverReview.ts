@@ -59,9 +59,10 @@ import {
 } from "../generated/gitbutler-core.ts";
 import {
 	getCommitDiffInfo,
-	listCommitHistory,
 	type CommitDiffInfo,
 } from "../generated/commit-history.ts";
+import { listCommitGraph, getTagDetails } from "../generated/git-graph-history.ts";
+import { GitGraphActionError, GIT_GRAPH_ACTION_NAMES, runGitGraphAction } from "../generated/git-graph-actions.ts";
 import {
 	checkoutPRHead,
 	getPRDiffScopeOptions,
@@ -2192,20 +2193,27 @@ export async function startReviewServer(options: {
 				if (reviewAnalysisMutationEpoch === analysisEpoch) reviewAnalysisMutationEpoch = null;
 			}
 		} else if (url.pathname === "/api/commits" && req.method === "GET") {
-			// Linear commit history for the Commits panel (mirrors Bun review.ts).
+			// Commit graph for the Commits panel (mirrors Bun review.ts).
 			// Git-local sessions only — PR/workspace/jj/p4 don't offer the view.
-			// Computed against the active diff's cwd (worktree-aware) and the
-			// active base so the divider matches the review baseline.
+			// Computed against the active diff's cwd (worktree-aware).
 			if (!options.gitContext || isPRMode || workspace || (sessionVcsType && sessionVcsType !== "git")) {
 				json(res, { error: "Commit history is only available for local git reviews" }, 400);
 				return;
 			}
 			const limitParam = Number.parseInt(url.searchParams.get("limit") ?? "", 10);
-			const before = url.searchParams.get("before") ?? undefined;
+			const flag = (key: string, fallback = true) => {
+				const v = url.searchParams.get(key);
+				if (v == null || v === "") return fallback;
+				return v !== "0" && v !== "false";
+			};
+			const branch = url.searchParams.get("branch") ?? "";
 			const commitsCwd = resolveVcsCwd(currentDiffType as DiffType, options.gitContext.cwd);
-			const page = await listCommitHistory(reviewRuntime, currentBase, commitsCwd, {
+			const page = await listCommitGraph(reviewRuntime, currentBase, commitsCwd, {
 				...(Number.isFinite(limitParam) && { limit: limitParam }),
-				...(before !== undefined && { before }),
+				showRemoteBranches: flag("remotes"),
+				showStashes: flag("stashes"),
+				showTags: flag("tags"),
+				...(branch ? { branches: [branch] } : {}),
 			});
 			if (!page) {
 				json(res, { error: "Could not read commit history" }, 500);
@@ -2215,13 +2223,55 @@ export async function startReviewServer(options: {
 			// session; misses just render the initials fallback client-side).
 			const avatars = await commitAvatars.resolve(
 				commitsCwd,
-				page.commits.map((c) => c.authorEmail),
+				page.commits.map((c) => c.authorEmail).filter((e) => e && e !== "*"),
 			);
 			for (const c of page.commits) {
 				const avatarUrl = avatars.get(c.authorEmail);
 				if (avatarUrl) c.avatarUrl = avatarUrl;
 			}
 			json(res, page);
+		} else if (url.pathname === "/api/git-graph/action" && req.method === "POST") {
+			if (!options.gitContext || isPRMode || workspace || (sessionVcsType && sessionVcsType !== "git")) {
+				json(res, { error: "Git graph actions are only available for local git reviews" }, 400);
+				return;
+			}
+			try {
+				const body = await parseBody(req);
+				const action = body.action as string | undefined;
+				if (typeof action !== "string" || !GIT_GRAPH_ACTION_NAMES.includes(action)) {
+					json(res, { error: "Unknown action" }, 400);
+					return;
+				}
+				const params =
+					body.params && typeof body.params === "object" && !Array.isArray(body.params)
+						? body.params as Record<string, unknown>
+						: {};
+				const actionCwd = resolveVcsCwd(currentDiffType as DiffType, options.gitContext.cwd);
+				await runGitGraphAction(reviewRuntime, action, params, actionCwd);
+				json(res, { ok: true });
+			} catch (err) {
+				const message = err instanceof Error ? err.message : "Git action failed";
+				const status = err instanceof GitGraphActionError ? 400 : 500;
+				json(res, { error: message }, status);
+			}
+		} else if (url.pathname === "/api/git-graph/tag" && req.method === "GET") {
+			if (!options.gitContext || isPRMode || workspace || (sessionVcsType && sessionVcsType !== "git")) {
+				json(res, { error: "Commit history is only available for local git reviews" }, 400);
+				return;
+			}
+			const name = url.searchParams.get("name") ?? "";
+			if (!name) {
+				json(res, { error: "Missing tag name" }, 400);
+				return;
+			}
+			try {
+				const tagCwd = resolveVcsCwd(currentDiffType as DiffType, options.gitContext.cwd);
+				const details = await getTagDetails(reviewRuntime, name, tagCwd);
+				json(res, details);
+			} catch (err) {
+				const message = err instanceof Error ? err.message : "Failed to read tag";
+				json(res, { error: message }, 400);
+			}
 		} else if (url.pathname === "/api/diff/switch" && req.method === "POST") {
 			// Capture the ordering token BEFORE any await — body delivery can
 			// finish out of arrival order under network jitter, so capturing after

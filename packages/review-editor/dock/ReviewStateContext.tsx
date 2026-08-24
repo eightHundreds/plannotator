@@ -228,6 +228,10 @@ export interface ReviewState {
   // Commit metadata when a commit:<sha> diff is active — heads the all-files
   // view (description card) and seeds its files collapsed.
   commitInfo: import('@plannotator/shared/types').CommitDiffInfo | null;
+  /** Pause all-files `/api/file-content` while the Commits veil is up
+   * (graph loading or an inbound commit switch) so those requests cannot
+   * fill the browser's per-host HTTP/1.1 socket pool. */
+  suspendFileContent?: boolean;
   semanticDiffAvailable: boolean;
   isSemanticDiffActive: boolean;
   onSemanticDiffUnavailable: () => void;

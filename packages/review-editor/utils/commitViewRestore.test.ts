@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { isCommitDiffType, resolveCommitExitDiff } from './commitViewRestore';
+import { commitDiffRestorePending, isCommitDiffType, resolveCommitExitDiff } from './commitViewRestore';
 
 // isCommitDiffType must agree with App.tsx's worktree parse and the server's
 // parseCommitDiffType about what the commit family IS — a divergence would
@@ -28,6 +28,24 @@ describe('isCommitDiffType', () => {
     ]) {
       expect(isCommitDiffType(t)).toBe(false);
     }
+  });
+});
+
+describe('commitDiffRestorePending', () => {
+  test('true for an on-screen commit diff even when nothing is loading', () => {
+    expect(commitDiffRestorePending('commit:abcdef12', false, false)).toBe(true);
+    expect(commitDiffRestorePending('worktree:/tmp/wt:commit:abcdef12', false, true)).toBe(true);
+  });
+
+  test('true for an inbound auto-select (memo captured, switch still in flight)', () => {
+    expect(commitDiffRestorePending('since-base', true, true)).toBe(true);
+    expect(commitDiffRestorePending('uncommitted', true, true)).toBe(true);
+  });
+
+  test('false when the session never entered the commit family', () => {
+    expect(commitDiffRestorePending('since-base', false, false)).toBe(false);
+    expect(commitDiffRestorePending('since-base', true, false)).toBe(false);
+    expect(commitDiffRestorePending('uncommitted', false, true)).toBe(false);
   });
 });
 

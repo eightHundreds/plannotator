@@ -317,6 +317,13 @@ export interface AllFilesCodeViewProps {
    * editor is ever constructed (code-split hosts also never fetch the editor
    * chunk; the single-file build inlines it, functionally inert). */
   enableEditSuggestions?: boolean;
+  /**
+   * Abort in-flight `/api/file-content` expansions and skip new ones. Used
+   * while the Commits veil is up (graph loading / inbound commit switch) so
+   * those requests cannot fill the browser's per-host HTTP/1.1 socket pool
+   * and starve `GET /api/commits`. Lifted, skipped items retry.
+   */
+  suspendFileContent?: boolean;
   /** Sink for suggestions derived from a completed edit session. Required for
    * edit mode to activate. */
   onAddSuggestionsForFile?: (filePath: string, hunks: SuggestionHunk[]) => void;
@@ -577,6 +584,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   getAIHistoryForFile,
   allowScrollChaining = false,
   enableEditSuggestions = false,
+  suspendFileContent = false,
   onAddSuggestionsForFile,
   onAddEditorCommentForFile,
 }) => {
@@ -1266,7 +1274,16 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // controls) works against the COMPLETE file. Mirrors LazyFileDiff's per-mount
   // fetch, but updates the existing CodeView item instead of mounting a fresh
   // FileDiff — so CodeView's own virtualization + element pool stay in charge.
+  const suspendFileContentRef = useRef(suspendFileContent);
+  suspendFileContentRef.current = suspendFileContent;
+  const skippedDueToSuspendRef = useRef(new Set<string>());
+  const augmentItemRef = useRef<(itemId: string) => void>(() => {});
+
   const augmentItem = useCallback((itemId: string) => {
+    if (suspendFileContentRef.current) {
+      skippedDueToSuspendRef.current.add(itemId);
+      return;
+    }
     // NOTE: deliberately no viewerRef check here. The FIRST onPostRender wave
     // (every initially visible item) fires synchronously inside CodeView's seed
     // layout effect, which runs BEFORE useImperativeHandle assigns the handle —
@@ -1425,6 +1442,22 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         void err;
       });
   }, [queueAugmentApply]);
+  augmentItemRef.current = augmentItem;
+
+  useEffect(() => {
+    if (suspendFileContent) {
+      for (const [itemId, entry] of augmentRef.current) {
+        if (entry.status !== 'pending') continue;
+        entry.controller.abort();
+        augmentRef.current.delete(itemId);
+        skippedDueToSuspendRef.current.add(itemId);
+      }
+      return;
+    }
+    const skipped = [...skippedDueToSuspendRef.current];
+    skippedDueToSuspendRef.current.clear();
+    for (const id of skipped) augmentItemRef.current(id);
+  }, [suspendFileContent]);
 
   // (Re)apply search marks for ONE item's node. Called on every render of that
   // item (onPostRender mount/update) so marks survive CodeView's element
