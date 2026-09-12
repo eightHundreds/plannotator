@@ -10,7 +10,8 @@ import { SETTINGS } from './settings';
  *   - SectionsPanel only mounts when the LIVE diff is since-base
  *     (`sectionsAvailable`); otherwise resolvePanelView falls back to Tree
  *   - the header toggle's handleSwitchToSections switches the LIVE diff to
- *     since-base for the session without rewriting Default Diff
+ *     since-base for the session (and restores Tree's previous classic
+ *     diff on the way back) without rewriting Default Diff
  *
  * Never write either setting by hand at call sites — always go through these
  * setters so last-used memo syncing stays in one place.

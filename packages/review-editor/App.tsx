@@ -118,6 +118,12 @@ import { ReviewSetupDialog } from './components/ReviewSetupDialog';
 import { initializeReviewSetup, markReviewSetupSeen } from './utils/reviewSetup';
 import { resolvePanelView } from './utils/resolvePanelView';
 import { commitDiffRestorePending, isCommitDiffType, resolveCommitExitDiff, type CommitViewRestoreTarget } from './utils/commitViewRestore';
+import {
+  isSinceBaseDiffType,
+  shouldCaptureSectionsRestore,
+  shouldRestoreSectionsDiff,
+  type SectionsViewRestoreTarget,
+} from './utils/sectionsViewRestore';
 import { GuideIntroDialog } from './components/GuideIntroDialog';
 import { needsGuideIntro, markGuideIntroSeen, needsGuideHint, markGuideHintSeen } from './utils/guideIntro';
 import { EditModeAnnouncementDialog } from './components/EditModeAnnouncementDialog';
@@ -504,12 +510,12 @@ const ReviewApp: React.FC = () => {
   const { state: callFlowAnalysis, retry: retryCallFlowAnalysis } = useCallFlowAnalysis(snapshotId, callFlowAvailable);
   const [isFetchingBase, setIsFetchingBase] = useState(false);
   // Which left panel is showing. The persisted value (Settings / first-run
-  // dialog, written through the coupled setters in config/reviewView)
-  // decides what a review OPENS on unless a last-used view is recorded; the
-  // header toggle is a session control layered over both — it NEVER writes
-  // the persisted view/diff pair. Changing the default is an explicit
-  // Settings/setup-dialog act, not a side effect of looking at another view
-  // mid-review; the toggle only records its choice as the last-used memo.
+  // dialog, written through setReviewPanelView) decides what a review OPENS
+  // on unless a last-used view is recorded; the header toggle is a session
+  // control layered over both — it NEVER writes the persisted view/diff pair.
+  // Changing the default is an explicit Settings/setup-dialog act, not a
+  // side effect of looking at another view mid-review; the toggle only
+  // records its choice as the last-used memo.
   const persistedPanelView = useConfigValue('reviewPanelView');
   const lastUsedPanelView = useConfigValue('reviewPanelViewLastUsed');
   const [sessionPanelView, setSessionPanelView] = useState<'sections' | 'commits' | 'tree' | null>(null);
@@ -558,6 +564,11 @@ const ReviewApp: React.FC = () => {
   // non-commit switch (see fetchDiffSwitch). Ref, not state: it never drives
   // a render, and capture happens inside event handlers.
   const preCommitDiffRef = useRef<CommitViewRestoreTarget | null>(null);
+  // Tree's live diff before Git status forced since-base. Captured on entry
+  // from Tree, restored when the toggle returns to Tree while still on
+  // since-base, cleared by any applied non-since-base switch (picker) so a
+  // later Tree click cannot overwrite the reviewer's new choice.
+  const preSectionsDiffRef = useRef<SectionsViewRestoreTarget | null>(null);
 
   const prStackCallbacksRef = useRef<import('./hooks/usePRStack').PRStackCallbacks | null>(null);
   const {
@@ -2320,6 +2331,7 @@ const ReviewApp: React.FC = () => {
       // newer commit switch still needs — correct by construction. Failed
       // switches never get here either, keeping the memo for a later retry.
       if (!isCommitDiffType(data.diffType)) preCommitDiffRef.current = null;
+      if (!isSinceBaseDiffType(data.diffType)) preSectionsDiffRef.current = null;
       setSnapshotId(data.snapshotId);
 
       const nextFiles = orderFilesBySections(parseDiffToFiles(data.rawPatch), data.sections);
@@ -2447,24 +2459,26 @@ const ReviewApp: React.FC = () => {
     await fetchDiffSwitch(fullDiffType, baseOverride);
   }, [diffType, activeWorktreePath, fetchDiffSwitch, gitContext]);
 
-  // Toggling to Sections means "show me the since-base review" — if another
-  // mode is active, switch the LIVE diff back along with the view. No writes
-  // to Default Diff: the toggle only records the last-used memo (via
-  // selectPanelView). Persisted reviewPanelView / defaultDiffType stay
-  // independent; SectionsPanel itself still requires live since-base.
+  // Toggling to Git status means "show me the since-base review" — Sections
+  // can render nothing else. Capture Tree's live classic diff first so
+  // returning to Tree restores it. No writes to Default Diff: the toggle
+  // only records last-used. Persisted reviewPanelView / defaultDiffType stay
+  // independent.
   const handleSwitchToSections = useCallback(() => {
+    if (shouldCaptureSectionsRestore(panelView, activeDiffBase)) {
+      preSectionsDiffRef.current = { diffType, base: selectedBase };
+    }
     selectPanelView('sections');
     if (activeDiffBase !== 'since-base') void handleDiffSwitch('since-base');
-  }, [selectPanelView, activeDiffBase, handleDiffSwitch]);
+  }, [selectPanelView, panelView, activeDiffBase, diffType, selectedBase, handleDiffSwitch]);
 
-  // Unified toggle handler for all three panel views. Sections carries a
-  // diff coupling (it can render nothing but since-base); Commits switches
-  // the view alone (its session machine then owns the diff via commit
-  // clicks / HEAD auto-select); and Tree restores the pre-Commits diff when
-  // it's the exit from the Commits view — the commit click hijacked the
-  // single session-global diff, so leaving the view brings back what the
-  // session was reviewing before. Outside that exit, Tree still leaves the
-  // active diff as-is (it can render any diff).
+  // Unified toggle handler for all three panel views. Git status forces live
+  // since-base (and restores the captured Tree diff on the way back). Commits
+  // switches the view alone (its session machine then owns the diff via commit
+  // clicks / HEAD auto-select); Tree restores the pre-Commits diff when it's
+  // the exit from Commits — the commit click hijacked the single session-
+  // global diff, so leaving the view brings back what the session was
+  // reviewing before.
   const handlePanelViewSelect = useCallback((view: 'sections' | 'commits' | 'tree') => {
     if (view === 'commits') {
       // The Commits rail has no search input, so an open search would become
@@ -2502,9 +2516,17 @@ const ReviewApp: React.FC = () => {
         activeWorktreePath,
       });
       void fetchDiffSwitch(target.diffType, target.base ?? undefined);
+    } else if (
+      shouldRestoreSectionsDiff(view, panelView, activeDiffBase, preSectionsDiffRef.current !== null, isLoadingDiff)
+    ) {
+      const memo = preSectionsDiffRef.current!;
+      preSectionsDiffRef.current = null;
+      void fetchDiffSwitch(memo.diffType, memo.base ?? undefined);
+    } else if (panelView === 'sections') {
+      preSectionsDiffRef.current = null;
     }
     selectPanelView(view);
-  }, [handleSwitchToSections, selectPanelView, searchQuery, isSearchOpen, clearSearch, closeSearch, panelView, diffType, isLoadingDiff, gitContext, activeWorktreePath, fetchDiffSwitch]);
+  }, [handleSwitchToSections, selectPanelView, searchQuery, isSearchOpen, clearSearch, closeSearch, panelView, diffType, isLoadingDiff, gitContext, activeWorktreePath, fetchDiffSwitch, activeDiffBase]);
 
   // Open a commit's own diff (vs its first parent) in the center dock. The
   // switch resets the dock to the all-files surface via the existing
