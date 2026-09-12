@@ -64,6 +64,21 @@ describe('initializeReviewSetup', () => {
     expect(needsReviewSetup()).toBe(false);
   });
 
+  test('a persisted Git status view keeps an independent classic Default Diff', () => {
+    // Persistence is no longer coupled: sections + uncommitted is a valid
+    // stored pair. Runtime falls back to Tree until live since-base.
+    installMemoryBackend({
+      'plannotator-review-panel-view': 'sections',
+      'plannotator-default-diff-type': 'uncommitted',
+    });
+    const store = makeStore();
+
+    expect(initializeReviewSetup(store)).toBe(false);
+    expect(store.get('reviewPanelView')).toBe('sections');
+    expect(store.get('defaultDiffType')).toBe('uncommitted');
+    expect(needsReviewSetup()).toBe(false);
+  });
+
   test('a persisted Tree view is left alone rather than re-written', () => {
     installMemoryBackend({
       'plannotator-review-panel-view': 'tree',

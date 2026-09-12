@@ -16,10 +16,9 @@ import treeImg from '@plannotator/ui/assets/review-tree.png';
  * Self-contained: reads/writes the configStore directly so it works both as a
  * first-run dialog and from the Settings panel.
  *
- * Coupling rule — the Sections view is DEFINED by the since-base diff, so:
- *   Sections view  ⟺  defaultDiffType === 'since-base'
- * Tree view can show any diff (including since-base, i.e. a tree of the
- * everything-set). The setters below keep the two settings consistent.
+ * Persistence is independent: any view + any default diff may be stored.
+ * Runtime still gates Git status — SectionsPanel only mounts on live
+ * since-base; otherwise the session opens in Tree without rewriting prefs.
  */
 
 interface ReviewSetupDialogProps {
@@ -67,8 +66,6 @@ export const ReviewSetupDialog: React.FC<ReviewSetupDialogProps> = ({ isOpen, on
 
   if (!isOpen) return null;
 
-  // Coupling (sections ⟺ since-base) lives in the shared setters — never
-  // write the pair by hand (see @plannotator/ui/config/reviewView).
   const chooseView = (key: 'sections' | 'tree') => setReviewPanelView(key);
   const chooseDiff = (value: DiffChoice) => setReviewDefaultDiffType(value);
 
@@ -87,6 +84,7 @@ export const ReviewSetupDialog: React.FC<ReviewSetupDialogProps> = ({ isOpen, on
                 since <span className="font-mono">origin/main</span>. It isn't a literal PR (only
                 committed work lands in one — pick <span className="text-foreground font-medium">Committed changes</span>{' '}
                 for that), but it gives you the whole local picture. Switch anytime, or change these later in Settings.
+                Git status opens only when Default Diff is All changes; with another diff, reviews open in Tree and both preferences stay saved.
               </p>
             </div>
 

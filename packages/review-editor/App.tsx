@@ -16,7 +16,7 @@ import { PullRequestIcon } from '@plannotator/ui/components/PullRequestIcon';
 import { getPlatformLabel, getMRLabel, getMRNumberLabel, getDisplayRepo } from '@plannotator/shared/pr-types';
 import type { SemanticDiffAdvert } from '@plannotator/shared/semantic-diff-types';
 import type { CallFlowAdvert, CallFlowNode } from '@plannotator/shared/call-flow-types';
-import { configStore, useConfigValue, setReviewPanelView } from '@plannotator/ui/config';
+import { configStore, useConfigValue } from '@plannotator/ui/config';
 import { loadDiffFont } from '@plannotator/ui/utils/diffFonts';
 import { getAgentSwitchSettings, getEffectiveAgentName } from '@plannotator/ui/utils/agentSwitch';
 import { useAIProviderConfig } from '@plannotator/ui/hooks/useAIProviderConfig';
@@ -2449,11 +2449,9 @@ const ReviewApp: React.FC = () => {
 
   // Toggling to Sections means "show me the since-base review" — if another
   // mode is active, switch the LIVE diff back along with the view. No writes
-  // to the persisted view/diff pair: the toggle only records the last-used
-  // memo (via selectPanelView), so there is no pair to keep consistent here
-  // (Settings and the setup dialog, which do persist, enforce the
-  // sections ⟺ since-base coupling via the shared setters in
-  // config/reviewView).
+  // to Default Diff: the toggle only records the last-used memo (via
+  // selectPanelView). Persisted reviewPanelView / defaultDiffType stay
+  // independent; SectionsPanel itself still requires live since-base.
   const handleSwitchToSections = useCallback(() => {
     selectPanelView('sections');
     if (activeDiffBase !== 'since-base') void handleDiffSwitch('since-base');
@@ -2595,34 +2593,6 @@ const ReviewApp: React.FC = () => {
     });
     void fetchDiffSwitch(target.diffType);
   }, [isLoading, diffData, diffType, panelView, gitContext, activeWorktreePath, fetchDiffSwitch]);
-
-  // Self-heal a conflicted persisted pair: reviewPanelView=sections with a
-  // non-since-base defaultDiffType. Every UI writer enforces the coupling
-  // (sections ⟺ since-base), but configStore.init() applies config.json over
-  // the cookie WITHOUT it — so a stale server value (a debounced write lost
-  // when a session closed, or a pre-feature config file) re-corrupts the pair
-  // on every load: the server opens on the stale diff in the classic tree
-  // while the cookie still says Git status. Trust the view choice, repair the
-  // diff default (cookie + config.json), and bring the live session along.
-  // Keyed to persistedPanelView, NEVER the live panelView: the header toggle
-  // is session-only and must not be able to trigger a settings write, even
-  // indirectly through this repair. Only a pair that Settings / the setup
-  // dialog / an old config file actually PERSISTED conflicted gets healed.
-  const healedPanelPairOnLoad = useRef(false);
-  useEffect(() => {
-    if (healedPanelPairOnLoad.current || isLoading || !diffData) return;
-    // First-run resets + applies the pair itself (on dialog dismiss).
-    if (!sectionsCapable || reviewSetupIsFirstRun.current) return;
-    if (persistedPanelView !== 'sections') return;
-    healedPanelPairOnLoad.current = true;
-    if (configStore.get('defaultDiffType') !== 'since-base') {
-      // Re-assert the pair through the coupled setter (repairs cookie +
-      // config.json), then bring the live session along. This is a repair,
-      // not a user choice — it must not overwrite the last-used memo.
-      setReviewPanelView('sections', { recordLastUsed: false });
-      if (activeDiffBase !== 'since-base') void handleDiffSwitch('since-base');
-    }
-  }, [isLoading, diffData, sectionsCapable, persistedPanelView, activeDiffBase, handleDiffSwitch]);
 
   // Switch worktree context (or back to main repo). Preserves the current
   // diff mode across the switch — if the reviewer was looking at "PR Diff"

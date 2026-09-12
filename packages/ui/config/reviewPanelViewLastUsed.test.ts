@@ -61,17 +61,15 @@ describe('reviewPanelViewLastUsed setting', () => {
     expect(values.get('plannotator-review-panel-view-last-used')).toBe('tree');
   });
 
-  test('recordLastUsed: false (the self-heal) repairs the pair without stomping the memo', () => {
+  test('recordLastUsed: false updates the persisted view without stomping the memo', () => {
     installMemoryBackend();
     const store = makeStore();
 
     setReviewPanelView('tree', undefined, store);
     setReviewPanelView('sections', { recordLastUsed: false }, store);
 
-    // The pair was repaired...
     expect(store.get('reviewPanelView')).toBe('sections');
-    expect(store.get('defaultDiffType')).toBe('since-base');
-    // ...but the user's last-used view survived.
+    // A non-choice write must not overwrite the user's last-used memo.
     expect(store.get('reviewPanelViewLastUsed')).toBe('tree');
   });
 });

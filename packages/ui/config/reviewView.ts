@@ -2,23 +2,18 @@ import { configStore } from './configStore';
 import { SETTINGS } from './settings';
 
 /**
- * The ONLY writers for the coupled setting pair (reviewPanelView,
+ * Writers for the review opening preferences (reviewPanelView,
  * defaultDiffType).
  *
- * Invariant: the Sections (Git status) view can only render the since-base
- * diff. So:
- *   - choosing the sections view forces defaultDiffType = 'since-base'
- *   - choosing a non-since-base default diff snaps the view to 'tree'
- *   - tree + since-base IS valid — switching to Tree leaves the diff, and
- *     choosing since-base leaves the view
+ * Persistence is independent: Settings / ReviewSetup may store any combination
+ * of panel view and default diff. Runtime is what gates Git status:
+ *   - SectionsPanel only mounts when the LIVE diff is since-base
+ *     (`sectionsAvailable`); otherwise resolvePanelView falls back to Tree
+ *   - the header toggle's handleSwitchToSections switches the LIVE diff to
+ *     since-base for the session without rewriting Default Diff
  *
- * Hand-mirroring these rules at call sites is how the split-brain bug
- * happened (a writer persisted one half of the pair; configStore.init()
- * then re-corrupted it from the server every session). Never write either
- * setting directly — always go through these setters. configStore.init()
- * remains the one non-writer that can produce a conflicted pair from a
- * stale config.json; the App-level load reconciler heals that case by
- * calling setReviewPanelView('sections', { recordLastUsed: false }).
+ * Never write either setting by hand at call sites — always go through these
+ * setters so last-used memo syncing stays in one place.
  */
 
 /** Store seam for tests (fresh ConfigStoreForTest); production always uses the singleton. */
@@ -33,13 +28,9 @@ export function setReviewPanelView(
   // An explicit persisted choice also becomes the last-used view — otherwise
   // a stale last-used cookie would immediately shadow what the user just
   // picked in Settings / the setup dialog. recordLastUsed: false is for
-  // NON-choices: the App self-heal repairs a conflicted persisted pair
-  // without any user action, so it must not overwrite the user's memo.
+  // non-choice writes that must not overwrite the user's memo.
   if (options?.recordLastUsed !== false) {
     store.set('reviewPanelViewLastUsed', view);
-  }
-  if (view === 'sections' && store.get('defaultDiffType') !== 'since-base') {
-    store.set('defaultDiffType', 'since-base');
   }
 }
 
@@ -66,10 +57,4 @@ export function setReviewDefaultDiffType(
   store: PanelViewConfigStore = configStore,
 ): void {
   store.set('defaultDiffType', value);
-  if (value !== 'since-base' && store.get('reviewPanelView') !== 'tree') {
-    store.set('reviewPanelView', 'tree');
-    // The snap is an explicit-choice consequence (the user picked a classic
-    // diff default), so it syncs the memo like any explicit view write.
-    store.set('reviewPanelViewLastUsed', 'tree');
-  }
 }

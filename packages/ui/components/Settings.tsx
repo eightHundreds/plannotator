@@ -370,6 +370,7 @@ function ReviewAnalysisTab() {
 const GitTab: React.FC<{ sinceBaseUnavailable?: boolean }> = ({ sinceBaseUnavailable }) => {
   const defaultDiffType = useConfigValue('defaultDiffType');
   const reviewPanelView = useConfigValue('reviewPanelView');
+  const gitStatusNeedsSinceBase = defaultDiffType !== 'since-base';
   return (
     <div className="space-y-5">
       <div className="space-y-2">
@@ -385,6 +386,12 @@ const GitTab: React.FC<{ sinceBaseUnavailable?: boolean }> = ({ sinceBaseUnavail
               Git status view isn't available in this repository (its base branch
               couldn't be resolved) — reviews here open in Tree. The preference
               still applies in repositories where it works.
+            </div>
+          )}
+          {gitStatusNeedsSinceBase && (
+            <div className="text-xs text-muted-foreground mt-1">
+              Git status only opens when Default Diff is All changes (since-base).
+              With another diff default, reviews open in Tree — both preferences are kept.
             </div>
           )}
         </div>
@@ -409,8 +416,6 @@ const GitTab: React.FC<{ sinceBaseUnavailable?: boolean }> = ({ sinceBaseUnavail
           <button
             key={opt.value}
             type="button"
-            // Coupling (sections ⟺ since-base) lives in the shared setter —
-            // never write the pair by hand (see config/reviewView).
             onClick={() => setReviewDefaultDiffType(opt.value)}
             className={`w-full flex items-start gap-3 p-3 rounded-lg border transition-colors text-left ${
               defaultDiffType === opt.value
