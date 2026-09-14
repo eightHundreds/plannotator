@@ -135,6 +135,8 @@ describe("Amp Plannotator plugin helpers", () => {
     expect(findFirstPositionalArg(["--no-jina", "https://example.com"])).toBe("https://example.com");
     expect(findFirstPositionalArg(["--markdown", "docs/page.html"])).toBe("docs/page.html");
     expect(findFirstPositionalArg(["--browser", "Google Chrome", "docs/plan.md"])).toBe("docs/plan.md");
+    expect(findFirstPositionalArg(["--otty", "docs/plan.md"])).toBe("docs/plan.md");
+    expect(findFirstPositionalArg(["--otty-args", "--new-tab", "docs/plan.md"])).toBe("docs/plan.md");
   });
 
   test("distinguishes canceled review target prompts from blank local reviews", () => {

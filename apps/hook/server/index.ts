@@ -70,6 +70,11 @@
  *   --help             - Show top-level usage information
  *   --version, -v      - Print version and exit
  *   --browser <name>   - Override which browser to open (e.g. "Google Chrome")
+ *   --otty             - Open the session in Otty (`otty view <url> [args]`)
+ *                        instead of the system browser; still waits for the
+ *                        reviewer like a normal review/annotate session
+ *   --otty-args <args> - Extra flags forwarded to `otty view` (implies --otty)
+ *   --                 - With --otty, remaining tokens are forwarded to Otty
  *
  * Environment variables:
  *   PLANNOTATOR_REMOTE - Set to "1"/"true" for remote, "0"/"false" for local
@@ -226,11 +231,40 @@ const resultFile = parsedStrictAnnotateOptions.resultFile
     )
   : undefined;
 
-// Global flag: --browser <name>
+// Global flags: --browser <name> / --otty (mutually exclusive)
 const browserIdx = args.indexOf("--browser");
+const ottyIdx = args.indexOf("--otty");
+const ottyArgsIdx = args.indexOf("--otty-args");
+if ((ottyIdx !== -1 || ottyArgsIdx !== -1) && browserIdx !== -1) {
+  console.error("plannotator: --otty cannot be combined with --browser");
+  process.exit(2);
+}
 if (browserIdx !== -1 && args[browserIdx + 1]) {
   process.env.PLANNOTATOR_BROWSER = args[browserIdx + 1];
   args.splice(browserIdx, 2);
+}
+if (args.indexOf("--otty") !== -1) {
+  process.env.PLANNOTATOR_OTTY = "1";
+  args.splice(args.indexOf("--otty"), 1);
+}
+if (args.indexOf("--otty-args") !== -1) {
+  const idx = args.indexOf("--otty-args");
+  const value = args[idx + 1];
+  if (value === undefined) {
+    console.error("plannotator: --otty-args requires a value (Otty flags after `otty view <url>`)");
+    process.exit(2);
+  }
+  process.env.PLANNOTATOR_OTTY = "1";
+  process.env.PLANNOTATOR_OTTY_ARGS = value;
+  args.splice(idx, 2);
+}
+// `plannotator review --otty -- --split` → otty view <url> --split
+if (process.env.PLANNOTATOR_OTTY === "1") {
+  const dashdash = args.indexOf("--");
+  if (dashdash !== -1) {
+    process.env.PLANNOTATOR_OTTY_ARGS = JSON.stringify(args.slice(dashdash + 1));
+    args.splice(dashdash);
+  }
 }
 
 // Transport flag: --tailscale (review / annotate / annotate-last) — publish

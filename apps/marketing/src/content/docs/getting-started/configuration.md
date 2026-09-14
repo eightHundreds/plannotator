@@ -131,6 +131,14 @@ plannotator review --browser "Safari"
 plannotator annotate plan.md --browser "Firefox"
 ```
 
+To open the session in Otty's embedded browser instead of the system browser (the CLI still waits for Approve / Send Feedback):
+
+```bash
+plannotator review --otty
+plannotator review --otty -- --new-tab
+plannotator review --otty-args "--new-tab"
+```
+
 ## Session discovery
 
 If you accidentally close a Plannotator browser tab, the server is still running — you just need the URL. The `sessions` subcommand lists active sessions and can reopen them:

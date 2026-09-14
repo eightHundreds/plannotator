@@ -26,6 +26,118 @@ export function isNoOpBrowserSentinel(value: string | undefined): boolean {
   return NOOP_BROWSER_VALUES.has(value.trim().toLowerCase());
 }
 
+/** `--otty` / PLANNOTATOR_OTTY: open the session in Otty's embedded browser. */
+export function isOttyOpenRequested(env: NodeJS.ProcessEnv = process.env): boolean {
+  const value = env.PLANNOTATOR_OTTY;
+  return value === "1" || value?.toLowerCase() === "true" || value?.toLowerCase() === "yes";
+}
+
+/**
+ * Extra `otty view` flags from PLANNOTATOR_OTTY_ARGS. A JSON string array is
+ * used as-is (CLI `--` passthrough); otherwise the value is split on
+ * whitespace with simple quotes.
+ */
+export function parseOttyExtraArgs(raw: string | undefined): string[] {
+  if (!raw) return [];
+  const trimmed = raw.trim();
+  if (!trimmed) return [];
+  if (trimmed.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(trimmed) as unknown;
+      if (Array.isArray(parsed) && parsed.every((item) => typeof item === "string")) {
+        return parsed;
+      }
+    } catch {
+      // Fall through to the tokenizer so a malformed JSON string is not silent.
+    }
+  }
+  const out: string[] = [];
+  let current = "";
+  let quote: '"' | "'" | null = null;
+  for (const char of trimmed) {
+    if (quote) {
+      if (char === quote) quote = null;
+      else current += char;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (/\s/.test(char)) {
+      if (current) {
+        out.push(current);
+        current = "";
+      }
+      continue;
+    }
+    current += char;
+  }
+  if (current) out.push(current);
+  return out;
+}
+
+export function buildOttyViewArgs(
+  url: string,
+  extraArgs: string[] = parseOttyExtraArgs(process.env.PLANNOTATOR_OTTY_ARGS),
+): string[] {
+  return ["view", url, ...extraArgs];
+}
+
+export function formatOttyViewCommand(
+  url: string,
+  extraArgs: string[] = parseOttyExtraArgs(process.env.PLANNOTATOR_OTTY_ARGS),
+): string {
+  return ["otty", ...buildOttyViewArgs(url, extraArgs)].join(" ");
+}
+
+export type OttySpawn = (
+  command: string,
+  args: string[],
+  options: { detached?: boolean; stdio?: "ignore" },
+) => { unref(): void; once(event: "error", listener: () => void): void };
+
+/**
+ * Open the session URL with `otty view <url> [extra args]`.
+ * Extra flags come from `--` / `--otty-args` / PLANNOTATOR_OTTY_ARGS.
+ * Does not wait for Otty to exit — the Plannotator process still blocks on
+ * the review/annotate decision, same as a normal `plannotator review`.
+ */
+export async function openInOtty(
+  url: string,
+  deps?: {
+    which?: (command: string) => string | null;
+    spawn?: OttySpawn;
+    extraArgs?: string[];
+  },
+): Promise<boolean> {
+  const which = deps?.which ?? ((command) => Bun.which(command) ?? null);
+  const spawnImpl = deps?.spawn ?? (spawn as unknown as OttySpawn);
+  const bin = which("otty");
+  if (!bin) return false;
+  const argv = buildOttyViewArgs(url, deps?.extraArgs);
+
+  return await new Promise((resolve) => {
+    let settled = false;
+    const finish = (opened: boolean) => {
+      if (settled) return;
+      settled = true;
+      resolve(opened);
+    };
+    try {
+      const child = spawnImpl(bin, argv, {
+        detached: true,
+        stdio: "ignore",
+      });
+      child.once("error", () => finish(false));
+      child.unref();
+      queueMicrotask(() => finish(true));
+    } catch {
+      finish(false);
+    }
+  });
+}
+
 /**
  * Try opening URL via VS Code extension IPC registry.
  * Falls back when env vars (PLANNOTATOR_BROWSER) aren't available to the process.

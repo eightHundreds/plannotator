@@ -314,6 +314,11 @@ export function findFirstPositionalArg(args: string[]): string | null {
       i += 1;
       continue;
     }
+    if (arg === "--otty") continue;
+    if (arg === "--otty-args") {
+      i += 1;
+      continue;
+    }
     if (!arg.startsWith("-")) return arg;
   }
 

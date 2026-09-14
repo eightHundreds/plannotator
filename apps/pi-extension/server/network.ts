@@ -300,11 +300,84 @@ async function openGlimpse(url: string): Promise<boolean> {
 	});
 }
 
+function isOttyOpenRequested(env: NodeJS.ProcessEnv = process.env): boolean {
+	const value = env.PLANNOTATOR_OTTY;
+	return value === "1" || value?.toLowerCase() === "true" || value?.toLowerCase() === "yes";
+}
+
+function parseOttyExtraArgs(raw: string | undefined): string[] {
+	if (!raw) return [];
+	const trimmed = raw.trim();
+	if (!trimmed) return [];
+	if (trimmed.startsWith("[")) {
+		try {
+			const parsed = JSON.parse(trimmed) as unknown;
+			if (Array.isArray(parsed) && parsed.every((item) => typeof item === "string")) {
+				return parsed;
+			}
+		} catch {
+			// Fall through.
+		}
+	}
+	const out: string[] = [];
+	let current = "";
+	let quote: '"' | "'" | null = null;
+	for (const char of trimmed) {
+		if (quote) {
+			if (char === quote) quote = null;
+			else current += char;
+			continue;
+		}
+		if (char === '"' || char === "'") {
+			quote = char;
+			continue;
+		}
+		if (/\s/.test(char)) {
+			if (current) {
+				out.push(current);
+				current = "";
+			}
+			continue;
+		}
+		current += char;
+	}
+	if (current) out.push(current);
+	return out;
+}
+
+async function openInOtty(url: string): Promise<boolean> {
+	const bin = findCommandOnPath("otty");
+	if (!bin) return false;
+	return await new Promise((resolve) => {
+		let settled = false;
+		const finish = (opened: boolean) => {
+			if (settled) return;
+			settled = true;
+			resolve(opened);
+		};
+		try {
+			const extra = parseOttyExtraArgs(process.env.PLANNOTATOR_OTTY_ARGS);
+		const child = spawn(bin, ["view", url, ...extra], {
+				detached: true,
+				stdio: "ignore",
+			});
+			child.once("error", () => finish(false));
+			child.unref();
+			queueMicrotask(() => finish(true));
+		} catch {
+			finish(false);
+		}
+	});
+}
+
 export async function openBrowser(url: string): Promise<{
 	opened: boolean;
 	isRemote?: boolean;
 	url?: string;
 }> {
+	if (isOttyOpenRequested()) {
+		return { opened: await openInOtty(url) };
+	}
 	const rawPlannotatorBrowser = process.env.PLANNOTATOR_BROWSER;
 	const rawBrowser = process.env.BROWSER;
 	const plannotatorBrowser = isNoOpBrowserSentinel(rawPlannotatorBrowser)

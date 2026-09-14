@@ -27,7 +27,7 @@ This skill is the knowledge layer. The `plannotator-review`, `plannotator-annota
 
 ## Session model
 
-Every review or annotate command starts a local web server, opens the browser, and blocks until the human decides. That can take minutes. Launch it with a long (or no) command timeout, or in the background, then read stdout when the process exits. Do not kill the process to "finish" a review; a session that ends without a decision reads as no feedback.
+Every review or annotate command starts a local web server, opens the browser (or Otty with `--otty`), and blocks until the human decides. That can take minutes. Launch it with a long (or no) command timeout, or in the background, then read stdout when the process exits. Do not kill the process to "finish" a review; a session that ends without a decision reads as no feedback.
 
 The stdout contract is the whole interface:
 
@@ -40,7 +40,7 @@ The stdout contract is the whole interface:
 ## plannotator review
 
 ```bash
-plannotator review [--git | --gitbutler] [--local | --no-local] [--tailscale] [PR_URL]
+plannotator review [--git | --gitbutler] [--local | --no-local] [--tailscale] [--otty] [PR_URL]
 ```
 
 Reviews local VCS changes, or a pull request when a URL is given. Feedback and annotations come back on stdout when the reviewer submits; an approval comes back as an LGTM-style message.
@@ -49,11 +49,12 @@ Reviews local VCS changes, or a pull request when a URL is given. Feedback and a
 - The default diff is "everything a PR would show now": merge-base of the trunk vs the working tree plus untracked files. The reviewer can switch diff types in the UI; you do not control that from the CLI.
 - PR review (`plannotator review https://github.com/owner/repo/pull/123`, GitLab MR URLs too) needs an authenticated `gh` or `glab` CLI. `--local` (the default) builds a local checkout of the PR head in the background for full file access; `--no-local` skips it and reviews the platform diff only.
 - `--tailscale` publishes the loopback session over the user's tailnet via `tailscale serve` (HTTPS, never public) and prints the URL with a QR code. A publish failure exits nonzero instead of leaving the server hanging.
+- `--otty` opens the session in Otty (`otty view <url>`) instead of the system browser. Extra Otty flags: `plannotator review --otty -- --new-tab` or `--otty-args "--new-tab"`. The process still waits for the reviewer. Cannot be combined with `--browser`.
 
 ## plannotator annotate
 
 ```bash
-plannotator annotate <target> [--markdown] [--no-jina] [--app | --static] [--render-html] [--tailscale] [--gate] [--json] [--hook]
+plannotator annotate <target> [--markdown] [--no-jina] [--app | --static] [--render-html] [--tailscale] [--otty] [--gate] [--json] [--hook]
 ```
 
 Opens one document, page, or app in the annotation UI and returns the human's annotations on stdout.
@@ -170,6 +171,8 @@ plannotator improve-context
 | `PLANNOTATOR_SHARE=disabled` | Disable URL sharing, including guide share links. |
 | `PLANNOTATOR_DATA_DIR` | Move the data directory (default `~/.plannotator`): plans, history, drafts, config. |
 | `PLANNOTATOR_BROWSER` | Open sessions in a specific browser. |
+| `PLANNOTATOR_OTTY=1` | Same as `--otty`: open in Otty instead of the system browser. |
+| `PLANNOTATOR_OTTY_ARGS` | Extra flags after `otty view <url>` (JSON array or quoted string). |
 
 ## Posting annotations into a live session
 

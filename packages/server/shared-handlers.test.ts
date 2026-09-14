@@ -232,6 +232,53 @@ describe("handleServerReady", () => {
     }
     expect(writes.join("")).toContain("http://localhost:4000");
   });
+
+  test("opens Otty instead of the system browser when PLANNOTATOR_OTTY is set", async () => {
+    const saved = process.env.PLANNOTATOR_OTTY;
+    process.env.PLANNOTATOR_OTTY = "1";
+    let ottyUrl = "";
+    let browserOpened = false;
+    try {
+      await handleServerReady("http://127.0.0.1:19432/", false, 19432, {
+        openBrowser: async () => {
+          browserOpened = true;
+          return true;
+        },
+        openInOtty: async (url) => {
+          ottyUrl = url;
+          return true;
+        },
+      });
+    } finally {
+      if (saved === undefined) delete process.env.PLANNOTATOR_OTTY;
+      else process.env.PLANNOTATOR_OTTY = saved;
+    }
+    expect(ottyUrl).toBe("http://127.0.0.1:19432/");
+    expect(browserOpened).toBe(false);
+  });
+
+  test("prints an Otty command when Otty is missing", async () => {
+    const saved = process.env.PLANNOTATOR_OTTY;
+    process.env.PLANNOTATOR_OTTY = "1";
+    const writes: string[] = [];
+    const original = process.stderr.write.bind(process.stderr);
+    (process.stderr as { write: unknown }).write = (chunk: unknown) => {
+      writes.push(String(chunk));
+      return true;
+    };
+    try {
+      await handleServerReady("http://127.0.0.1:19432/", false, 19432, {
+        openBrowser: async () => true,
+        openInOtty: async () => false,
+      });
+    } finally {
+      (process.stderr as { write: unknown }).write = original;
+      if (saved === undefined) delete process.env.PLANNOTATOR_OTTY;
+      else process.env.PLANNOTATOR_OTTY = saved;
+    }
+    expect(writes.join("")).toContain("otty view http://127.0.0.1:19432/");
+    expect(writes.join("")).not.toContain("--new-tab");
+  });
 });
 
 /**

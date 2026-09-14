@@ -8,7 +8,7 @@
 
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import { openBrowser as openBrowserImpl } from "./browser";
+import { formatOttyViewCommand, isOttyOpenRequested, openBrowser as openBrowserImpl, openInOtty as openInOttyImpl } from "./browser";
 import { isUrlHostOverridden } from "./remote";
 import { writeUrlQr } from "./qr";
 import { validateImagePath, validateUploadExtension, UPLOAD_DIR } from "./image";
@@ -226,6 +226,7 @@ interface ServerReadyOptions {
   readyFile?: string;
   skipBrowserOpen?: boolean;
   openBrowser?: typeof openBrowserImpl;
+  openInOtty?: typeof openInOttyImpl;
 }
 
 export interface ServerReadyMetadata {
@@ -280,6 +281,18 @@ export async function handleServerReady(
     }
   } else if (isCodexDesktopHost()) {
     process.stderr.write(`\n  Plannotator session ready:\n  ${url}\n\n`);
+  }
+
+  // Otty owns the tab; skip the system browser. Spawn is detached so this
+  // process still blocks on waitForDecision like a normal review.
+  if (isOttyOpenRequested()) {
+    const opened = await (options.openInOtty ?? openInOttyImpl)(url);
+    if (!opened && !isRemote) {
+      process.stderr.write(
+        `\n  Plannotator session ready — open in Otty:\n  ${formatOttyViewCommand(url)}\n\n`,
+      );
+    }
+    return;
   }
 
   const skipBrowserOpen = options.skipBrowserOpen ?? process.env.PLANNOTATOR_SKIP_BROWSER_OPEN === "1";

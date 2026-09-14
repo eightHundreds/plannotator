@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { isNoOpBrowserSentinel, shouldTryRemoteBrowserFallback } from "./browser";
+import {
+  isNoOpBrowserSentinel,
+  isOttyOpenRequested,
+  openInOtty,
+  parseOttyExtraArgs,
+  shouldTryRemoteBrowserFallback,
+} from "./browser";
 
 const savedEnv: Record<string, string | undefined> = {};
 const envKeys = ["PLANNOTATOR_BROWSER", "BROWSER"];
@@ -83,5 +89,68 @@ describe("isNoOpBrowserSentinel", () => {
     expect(isNoOpBrowserSentinel("Google Chrome")).toBe(false);
     expect(isNoOpBrowserSentinel("open")).toBe(false);
     expect(isNoOpBrowserSentinel("/usr/bin/true")).toBe(false);
+  });
+});
+
+describe("isOttyOpenRequested", () => {
+  test("recognizes 1 / true / yes", () => {
+    expect(isOttyOpenRequested({ PLANNOTATOR_OTTY: "1" })).toBe(true);
+    expect(isOttyOpenRequested({ PLANNOTATOR_OTTY: "true" })).toBe(true);
+    expect(isOttyOpenRequested({ PLANNOTATOR_OTTY: "YES" })).toBe(true);
+    expect(isOttyOpenRequested({})).toBe(false);
+    expect(isOttyOpenRequested({ PLANNOTATOR_OTTY: "0" })).toBe(false);
+  });
+});
+
+describe("parseOttyExtraArgs", () => {
+  test("splits quoted flags and JSON arrays", () => {
+    expect(parseOttyExtraArgs(undefined)).toEqual([]);
+    expect(parseOttyExtraArgs("  --new-tab --split  ")).toEqual(["--new-tab", "--split"]);
+    expect(parseOttyExtraArgs(`--profile "work space"`)).toEqual(["--profile", "work space"]);
+    expect(parseOttyExtraArgs(JSON.stringify(["--new-tab", "--foo=bar"]))).toEqual([
+      "--new-tab",
+      "--foo=bar",
+    ]);
+  });
+});
+
+describe("openInOtty", () => {
+  test("returns false when otty is not on PATH", async () => {
+    expect(await openInOtty("http://127.0.0.1:1/", { which: () => null })).toBe(false);
+  });
+
+  test("spawns otty view <url> with no extra flags by default", async () => {
+    const calls: { command: string; args: string[] }[] = [];
+    const opened = await openInOtty("http://127.0.0.1:19432/", {
+      which: () => "/usr/local/bin/otty",
+      extraArgs: [],
+      spawn: (command, args) => {
+        calls.push({ command, args });
+        return { unref() {}, once() {} };
+      },
+    });
+    expect(opened).toBe(true);
+    expect(calls).toEqual([
+      { command: "/usr/local/bin/otty", args: ["view", "http://127.0.0.1:19432/"] },
+    ]);
+  });
+
+  test("forwards extra Otty flags after the URL", async () => {
+    const calls: { command: string; args: string[] }[] = [];
+    await openInOtty("http://127.0.0.1:19432/", {
+      which: () => "/usr/local/bin/otty",
+      extraArgs: ["--split", "--profile", "work"],
+      spawn: (command, args) => {
+        calls.push({ command, args });
+        return { unref() {}, once() {} };
+      },
+    });
+    expect(calls[0]?.args).toEqual([
+      "view",
+      "http://127.0.0.1:19432/",
+      "--split",
+      "--profile",
+      "work",
+    ]);
   });
 });
